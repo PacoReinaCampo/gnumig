@@ -1,6 +1,6 @@
 ---
 title: 'PU-RTOS'
-subtitle: 'QueenField ![](../../mig.svg){width=17cm}'
+subtitle: 'QueenField ![](../../icon.jpg)'
 
 author: Paco Reina Campo
 

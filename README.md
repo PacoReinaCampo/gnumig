@@ -1,6 +1,6 @@
 # gnumig
 ## QueenField
 
-![QueenField](../master/icon.jpg)
+![QueenField](../master/mig.svg)
 
 **Mach Interface Generator for RTOS**
