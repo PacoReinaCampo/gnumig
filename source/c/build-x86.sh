@@ -9,14 +9,14 @@
 ##                  |_|                                                          ##
 ##                                                                               ##
 ##                                                                               ##
-##              Peripheral-NTM for MPSoC                                         ##
-##              Neural Turing Machine for MPSoC                                  ##
+##              QueenField                                                       ##
+##              Multi-Processor System on Chip                                   ##
 ##                                                                               ##
 ###################################################################################
 
 ###################################################################################
 ##                                                                               ##
-## Copyright (c) 2020-2024 by the author(s)                                      ##
+## Copyright (c) 2022-2025 by the author(s)                                      ##
 ##                                                                               ##
 ## Permission is hereby granted, free of charge, to any person obtaining a copy  ##
 ## of this software and associated documentation files (the "Software"), to deal ##
@@ -42,20 +42,167 @@
 ##                                                                               ##
 ###################################################################################
 
-#####################################################################
-# State-Feedback Sources
-#####################################################################
+cd application/arithmetic/scalar
+make clean
+make x86
 
-SOURCES_ARITHMETIC =	../../../library/arithmetic/ntm_arithmetic.h \
-			../../../library/arithmetic/matrix/ntm_matrix_adder.c \
-			../../../library/arithmetic/matrix/ntm_matrix_divider.c \
-			../../../library/arithmetic/matrix/ntm_matrix_multiplier.c \
-			../../../library/arithmetic/scalar/ntm_scalar_adder.c \
-			../../../library/arithmetic/scalar/ntm_scalar_divider.c \
-			../../../library/arithmetic/scalar/ntm_scalar_multiplier.c \
-			../../../library/arithmetic/tensor/ntm_tensor_adder.c \
-			../../../library/arithmetic/tensor/ntm_tensor_divider.c \
-			../../../library/arithmetic/tensor/ntm_tensor_multiplier.c \
-			../../../library/arithmetic/vector/ntm_vector_adder.c \
-			../../../library/arithmetic/vector/ntm_vector_divider.c \
-			../../../library/arithmetic/vector/ntm_vector_multiplier.c
+cd ../../../application/arithmetic/vector
+make clean
+make x86
+
+cd ../../../application/arithmetic/matrix
+make clean
+make x86
+
+cd ../../../application/arithmetic/tensor
+make clean
+make x86
+
+
+cd ../../../application/algebra/scalar
+make clean
+make x86
+
+cd ../../../application/algebra/vector
+make clean
+make x86
+
+cd ../../../application/algebra/matrix
+make clean
+make x86
+
+cd ../../../application/algebra/tensor
+make clean
+make x86
+
+
+cd ../../../application/math/scalar
+make clean
+make x86
+
+cd ../../../application/math/matrix
+make clean
+make x86
+
+cd ../../../application/math/vector
+make clean
+make x86
+
+
+#cd ../../../application/nn/ann/components
+#make clean
+#make x86
+
+#cd ../../../application/nn/ann/controller/fnn
+#make clean
+#make x86
+
+#cd ../../../application/nn/ann/controller/lstm
+#make clean
+#make x86
+
+#cd ../../../application/nn/ann/functions
+#make clean
+#make x86
+
+#cd ../../../application/nn/ann/inputs
+#make clean
+#make x86
+
+#cd ../../../application/nn/ann/top
+#make clean
+#make x86
+
+#cd ../../../application/nn/dnc/memory
+#make clean
+#make x86
+
+#cd ../../../application/nn/dnc/read_heads
+#make clean
+#make x86
+
+#cd ../../../application/nn/dnc/top
+#make clean
+#make x86
+
+#cd ../../../application/nn/dnc/trained
+#make clean
+#make x86
+
+#cd ../../../application/nn/dnc/write_heads
+#make clean
+#make x86
+
+#cd ../../../application/nn/fnn/convolutional
+#make clean
+#make x86
+
+#cd ../../../application/nn/fnn/standard
+#make clean
+#make x86
+
+#cd ../../../application/nn/lstm/convolutional
+#make clean
+#make x86
+
+#cd ../../../application/nn/lstm/standard
+#make clean
+#make x86
+
+#cd ../../../application/nn/ntm/memory
+#make clean
+#make x86
+
+#cd ../../../application/nn/ntm/read_heads
+#make clean
+#make x86
+
+#cd ../../../application/nn/ntm/top
+#make clean
+#make x86
+
+#cd ../../../application/nn/ntm/trained
+#make clean
+#make x86
+
+#cd ../../../application/nn/ntm/write_heads
+#make clean
+#make x86
+
+
+#cd ../../../application/state/feedback
+#make clean
+#make x86
+
+#cd ../../../application/state/outputs
+#make clean
+#make x86
+
+#cd ../../../application/state/top
+#make clean
+#make x86
+
+
+#cd ../../../application/trainer/differentiation
+#make clean
+#make x86
+
+#cd ../../../application/trainer/fnn
+#make clean
+#make x86
+
+#cd ../../../application/trainer/lstm/activation
+#make clean
+#make x86
+
+#cd ../../../application/trainer/lstm/forget
+#make clean
+#make x86
+
+#cd ../../../application/trainer/lstm/input
+#make clean
+#make x86
+
+#cd ../../../application/trainer/lstm/output
+#make clean
+#make

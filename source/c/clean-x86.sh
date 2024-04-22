@@ -9,14 +9,14 @@
 ##                  |_|                                                          ##
 ##                                                                               ##
 ##                                                                               ##
-##              Peripheral-NTM for MPSoC                                         ##
-##              Neural Turing Machine for MPSoC                                  ##
+##              QueenField                                                       ##
+##              Multi-Processor System on Chip                                   ##
 ##                                                                               ##
 ###################################################################################
 
 ###################################################################################
 ##                                                                               ##
-## Copyright (c) 2020-2024 by the author(s)                                      ##
+## Copyright (c) 2022-2025 by the author(s)                                      ##
 ##                                                                               ##
 ## Permission is hereby granted, free of charge, to any person obtaining a copy  ##
 ## of this software and associated documentation files (the "Software"), to deal ##
@@ -42,20 +42,127 @@
 ##                                                                               ##
 ###################################################################################
 
-#####################################################################
-# State-Feedback Sources
-#####################################################################
+cd application/arithmetic/scalar
+make clean
 
-SOURCES_ARITHMETIC =	../../../library/arithmetic/ntm_arithmetic.h \
-			../../../library/arithmetic/matrix/ntm_matrix_adder.c \
-			../../../library/arithmetic/matrix/ntm_matrix_divider.c \
-			../../../library/arithmetic/matrix/ntm_matrix_multiplier.c \
-			../../../library/arithmetic/scalar/ntm_scalar_adder.c \
-			../../../library/arithmetic/scalar/ntm_scalar_divider.c \
-			../../../library/arithmetic/scalar/ntm_scalar_multiplier.c \
-			../../../library/arithmetic/tensor/ntm_tensor_adder.c \
-			../../../library/arithmetic/tensor/ntm_tensor_divider.c \
-			../../../library/arithmetic/tensor/ntm_tensor_multiplier.c \
-			../../../library/arithmetic/vector/ntm_vector_adder.c \
-			../../../library/arithmetic/vector/ntm_vector_divider.c \
-			../../../library/arithmetic/vector/ntm_vector_multiplier.c
+cd ../../../application/arithmetic/vector
+make clean
+
+cd ../../../application/arithmetic/matrix
+make clean
+
+cd ../../../application/arithmetic/tensor
+make clean
+
+
+cd ../../../application/algebra/scalar
+make clean
+
+cd ../../../application/algebra/vector
+make clean
+
+cd ../../../application/algebra/matrix
+make clean
+
+cd ../../../application/algebra/tensor
+make clean
+
+
+cd ../../../application/math/scalar
+make clean
+
+cd ../../../application/math/matrix
+make clean
+
+cd ../../../application/math/vector
+make clean
+
+
+#cd ../../../application/nn/ann/components
+#make clean
+
+#cd ../../../application/nn/ann/controller/fnn
+#make clean
+
+#cd ../../../application/nn/ann/controller/lstm
+#make clean
+
+#cd ../../../application/nn/ann/functions
+#make clean
+
+#cd ../../../application/nn/ann/inputs
+#make clean
+
+#cd ../../../application/nn/ann/top
+#make clean
+
+#cd ../../../application/nn/dnc/memory
+#make clean
+
+#cd ../../../application/nn/dnc/read_heads
+#make clean
+
+#cd ../../../application/nn/dnc/top
+#make clean
+
+#cd ../../../application/nn/dnc/trained
+#make clean
+
+#cd ../../../application/nn/dnc/write_heads
+#make clean
+
+#cd ../../../application/nn/fnn/convolutional
+#make clean
+
+#cd ../../../application/nn/fnn/standard
+#make clean
+
+#cd ../../../application/nn/lstm/convolutional
+#make clean
+
+#cd ../../../application/nn/lstm/standard
+#make clean
+
+#cd ../../../application/nn/ntm/memory
+#make clean
+
+#cd ../../../application/nn/ntm/read_heads
+#make clean
+
+#cd ../../../application/nn/ntm/top
+#make clean
+
+#cd ../../../application/nn/ntm/trained
+#make clean
+
+#cd ../../../application/nn/ntm/write_heads
+#make clean
+
+
+#cd ../../../application/state/feedback
+#make clean
+
+#cd ../../../application/state/outputs
+#make clean
+
+#cd ../../../application/state/top
+#make clean
+
+
+#cd ../../../application/trainer/differentiation
+#make clean
+
+#cd ../../../application/trainer/fnn
+#make clean
+
+#cd ../../../application/trainer/lstm/activation
+#make clean
+
+#cd ../../../application/trainer/lstm/forget
+#make clean
+
+#cd ../../../application/trainer/lstm/input
+#make clean
+
+#cd ../../../application/trainer/lstm/output
+#make clean
