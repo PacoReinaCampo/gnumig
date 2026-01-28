@@ -36,7 +36,6 @@
 %token	syMsgSeqno
 %token	syWaitTime
 %token	syNoWaitTime
-%token	syErrorProc
 %token	syServerPrefix
 %token	syUserPrefix
 %token	syServerDemux
@@ -84,6 +83,8 @@
 %token	syRAngle
 %token	syLBrack
 %token	syRBrack
+%token	syLCBrack
+%token	syRCBrack
 %token	syBar
 
 %token	syError			/* lex error */
@@ -103,6 +104,7 @@
 
 %type	<statement_kind> ImportIndicant
 %type	<number> VarArrayHead ArrayHead StructHead IntExp
+%type   <structured_type> StructList
 %type	<type> NamedTypeSpec TransTypeSpec TypeSpec
 %type	<type> CStringSpec
 %type	<type> BasicTypeSpec PrevTypeSpec ArgumentType
@@ -116,6 +118,7 @@
 
 #include <stdio.h>
 
+#include "cpu.h"
 #include "error.h"
 #include "lexxer.h"
 #include "global.h"
@@ -123,6 +126,7 @@
 #include "type.h"
 #include "routine.h"
 #include "statement.h"
+#include "utils.h"
 
 static const char *import_name(statement_kind_t sk);
 
@@ -148,6 +152,14 @@ yyerror(const char *s)
 	const_string_t outstr;
 	u_int size;		/* 0 means there is no default size */
     } symtype;
+    /* Holds information about a structure while parsing. */
+    struct
+    {
+        /* The required alignment (in bytes) so far. */
+        u_int type_alignment_in_bytes;
+        /* The size of the struct in bytes so far. */
+        u_int size_in_bytes;
+    } structured_type;
     routine_t *routine;
     arg_kind_t direction;
     argument_t *argument;
@@ -163,7 +175,6 @@ Statements		:	/* empty */
 Statement		:	Subsystem sySemi
 			|	WaitTime sySemi
 			|	MsgOption sySemi
-			|	Error sySemi
 			|	ServerPrefix sySemi
 			|	UserPrefix sySemi
 			|	ServerDemux sySemi
@@ -199,6 +210,7 @@ Subsystem		:	SubsystemStart SubsystemMods
 	       IsKernelUser ? ", KernelUser" : "",
 	       IsKernelServer ? ", KernelServer" : "");
     }
+    init_type();
 }
 			;
 
@@ -207,8 +219,8 @@ SubsystemStart		:	sySubsystem
     if (SubsystemName != strNULL)
     {
 	warn("previous Subsystem decl (of %s) will be ignored", SubsystemName);
-	IsKernelUser = FALSE;
-	IsKernelServer = FALSE;
+	IsKernelUser = false;
+	IsKernelServer = false;
 	strfree((string_t) SubsystemName);
     }
 }
@@ -222,13 +234,13 @@ SubsystemMod		:	syKernelUser
 {
     if (IsKernelUser)
 	warn("duplicate KernelUser keyword");
-    IsKernelUser = TRUE;
+    IsKernelUser = true;
 }
 			|	syKernelServer
 {
     if (IsKernelServer)
 	warn("duplicate KernelServer keyword");
-    IsKernelServer = TRUE;
+    IsKernelServer = true;
 }
 			;
 
@@ -266,14 +278,6 @@ WaitTime		:	LookString syWaitTime syString
     WaitTime = strNULL;
     if (BeVerbose)
 	printf("NoWaitTime\n\n");
-}
-			;
-
-Error			:	syErrorProc syIdentifier
-{
-    ErrorProc = $2;
-    if (BeVerbose)
-	printf("ErrorProc %s\n\n", ErrorProc);
 }
 			;
 
@@ -332,7 +336,7 @@ TypeDecl		:	syType NamedTypeSpec
     identifier_t name = $2->itName;
 
     if (itLookUp(name) != itNULL)
-	warn("overriding previous definition of %s", name);
+		error("overriding previous definition of %s", name);
     itInsert(name, $2);
 }
 			;
@@ -459,10 +463,42 @@ TypeSpec		:	BasicTypeSpec
 			|	syCaret TypeSpec
 				{ $$ = itPtrDecl($2); }
 			|	StructHead TypeSpec
-				{ $$ = itStructDecl($1, $2); }
+				{ $$ = itStructArrayDecl($1, $2); }
+                        |       syStruct syLCBrack StructList syRCBrack
+				{ $$ = itStructDecl($3.size_in_bytes, $3.type_alignment_in_bytes); }
 			|	CStringSpec
 				{ $$ = $1; }
 			;
+
+StructList   		: 	syIdentifier syIdentifier sySemi
+{
+    ipc_type_t *t = itPrevDecl($1);
+    if (!t) {
+        error("Type %s not found\n", $1);
+    }
+    if (!t->itInLine) {
+        error("Type %s must be inline\n", $2);
+    }
+
+    $$.type_alignment_in_bytes = t->itAlignment;
+    $$.size_in_bytes = t->itTypeSize;
+}
+			|	StructList syIdentifier syIdentifier sySemi
+{
+    ipc_type_t *t = itPrevDecl($2);
+    if (!t) {
+        error("Type %s not found\n", $2);
+    }
+    if (!t->itInLine) {
+        error("Type %s must be inline\n", $2);
+    }
+    $$.type_alignment_in_bytes = MAX(t->itAlignment, $1.type_alignment_in_bytes);
+    int padding_bytes = 0;
+    if ($1.size_in_bytes % t->itAlignment)
+        padding_bytes = t->itAlignment - ($1.size_in_bytes % t->itAlignment);
+    $$.size_in_bytes = $1.size_in_bytes + padding_bytes + t->itTypeSize;
+}
+                        ;
 
 BasicTypeSpec		:	IPCType
 {
@@ -519,8 +555,8 @@ IPCType			:	PrimIPCType
 	    $$.size = $1.size;
 	else
 	{
-	    error("sizes in IPCTypes (%d, %d) aren't equal",
-		  $1.size, $3.size);
+	    error("sizes in IPCTypes (%s %s %d, %s %s %d) aren't equal",
+		  $1.instr, $1.outstr, $1.size, $3.instr, $3.outstr, $3.size);
 	    $$.size = 0;
 	}
     }
@@ -555,10 +591,10 @@ StructHead		:	syStruct syLBrack IntExp syRBrack syOf
 			;
 
 CStringSpec		:	syCString syLBrack IntExp syRBrack
-				{ $$ = itCStringDecl($3, FALSE); }
+				{ $$ = itCStringDecl($3, false); }
 			|	syCString syLBrack syStar syColon
 				IntExp syRBrack
-				{ $$ = itCStringDecl($5, TRUE); }
+				{ $$ = itCStringDecl($5, true); }
 			;
 
 IntExp			: 	IntExp	syPlus	IntExp

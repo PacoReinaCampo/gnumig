@@ -24,6 +24,7 @@
  * the rights to redistribute these changes.
  */
 
+#include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -32,19 +33,12 @@
 #include "type.h"
 #include "message.h"
 #include "cpu.h"
+#include "utils.h"
 
-#if word_size_in_bits == 32
-#define	word_size_name MACH_MSG_TYPE_INTEGER_32
-#define	word_size_name_string "MACH_MSG_TYPE_INTEGER_32"
-#else
-#if word_size_in_bits == 64
-#define	word_size_name MACH_MSG_TYPE_INTEGER_64
-#define	word_size_name_string "MACH_MSG_TYPE_INTEGER_64"
-#else
-#error Unsupported word size!
-#endif
-#endif
+#define int_name MACH_MSG_TYPE_INTEGER_32
+#define int_name_string "MACH_MSG_TYPE_INTEGER_32"
 
+ipc_type_t *itByteType;         /* used for defining struct types */
 ipc_type_t *itRetCodeType;	/* used for return codes */
 ipc_type_t *itDummyType;	/* used for camelot dummy args */
 ipc_type_t *itRequestPortType;	/* used for default Request port arg */
@@ -52,6 +46,12 @@ ipc_type_t *itZeroReplyPortType;/* used for dummy Reply port arg */
 ipc_type_t *itRealReplyPortType;/* used for default Reply port arg */
 ipc_type_t *itWaitTimeType;	/* used for dummy WaitTime args */
 ipc_type_t *itMsgOptionType;	/* used for dummy MsgOption args */
+ipc_type_t *itShortType;        /* used for the short type */
+ipc_type_t *itIntType;          /* used for the int type */
+ipc_type_t *itInt64Type;        /* used for the int64 type */
+ipc_type_t *itUintPtrType;      /* used for the uintptr_t type */
+ipc_type_t *itIntPtrType;       /* used for the intptr_t type */
+static bool types_initialized = false;
 
 static ipc_type_t *list = itNULL;
 
@@ -62,6 +62,13 @@ static ipc_type_t *list = itNULL;
 ipc_type_t *
 itLookUp(identifier_t name)
 {
+    if (!types_initialized)
+    {
+        error("Basic types not initialized when looking up type %s. Did you "
+              "forget to define the subsystem?", name);
+        return NULL;
+    }
+
     ipc_type_t *it, **last;
 
     for (it = *(last = &list); it != itNULL; it = *(last = &it->itNext))
@@ -100,21 +107,23 @@ itAlloc(void)
 	0,			/* u_int itTypeSize */
 	0,			/* u_int itPadSize */
 	0,			/* u_int itMinTypeSize */
+	0,			/* u_int itAlignment */
 	0,			/* u_int itInName */
 	0,			/* u_int itOutName */
 	0,			/* u_int itSize */
 	1,			/* u_int itNumber */
-	TRUE,			/* boolean_t itInLine */
-	FALSE,			/* boolean_t itLongForm */
+	true,			/* bool itInLine */
+	false,			/* bool itLongForm */
 	d_NO,			/* dealloc_t itDeallocate */
 	strNULL,		/* string_t itInNameStr */
 	strNULL,		/* string_t itOutNameStr */
 	flNone,			/* ipc_flags_t itFlags */
-	TRUE,			/* boolean_t itStruct */
-	FALSE,			/* boolean_t itString */
-	FALSE,			/* boolean_t itVarArray */
-	FALSE,			/* boolean_t itIndefinite */
-	FALSE,			/* boolean_t itKernelPort */
+	true,			/* bool itStruct */
+	false,			/* bool itString */
+	false,			/* bool itVarArray */
+	false,			/* bool itIndefinite */
+	false,			/* bool itUserlandPort */
+	false,			/* bool itKernelPort */
 	itNULL,			/* ipc_type_t *itElement */
 	strNULL,		/* identifier_t itUserType */
 	strNULL,		/* identifier_t itServerType */
@@ -153,10 +162,12 @@ itNameToString(u_int name)
 static void
 itCalculateSizeInfo(ipc_type_t *it)
 {
+    assert(it->itAlignment > 0);
+
     if (it->itInLine)
     {
 	u_int bytes = (it->itNumber * it->itSize + 7) / 8;
-	u_int padding = (word_size - bytes % word_size) % word_size;
+	u_int padding = (complex_alignof - bytes % complex_alignof) % complex_alignof;
 
 	it->itTypeSize = bytes;
 	it->itPadSize = padding;
@@ -173,6 +184,7 @@ itCalculateSizeInfo(ipc_type_t *it)
 	it->itTypeSize = bytes;
 	it->itPadSize = 0;
 	it->itMinTypeSize = bytes;
+	assert(it->itAlignment == bytes);
     }
 
     /* Unfortunately, these warning messages can't give a type name;
@@ -183,6 +195,15 @@ itCalculateSizeInfo(ipc_type_t *it)
 
     if ((it->itTypeSize == 0) && !it->itVarArray)
 	warn("sizeof(%s) == 0", it->itName);
+}
+
+static bool
+itIsPortType(ipc_type_t *it)
+{
+    return ((it->itInName == MACH_MSG_TYPE_POLYMORPHIC) &&
+	    (it->itOutName == MACH_MSG_TYPE_POLYMORPHIC)) ||
+	MACH_MSG_TYPE_PORT_ANY(it->itInName) ||
+	MACH_MSG_TYPE_PORT_ANY(it->itOutName);
 }
 
 /*
@@ -203,6 +224,10 @@ itCalculateNameInfo(ipc_type_t *it)
     if (it->itServerType == strNULL)
 	it->itServerType = it->itName;
 
+    bool isPortType = itIsPortType(it);
+    bool isServerPort = isPortType && streql(it->itServerType, "mach_port_t");
+    bool isUserPort = isPortType && streql(it->itUserType, "mach_port_t");
+
     /*
      *	KernelServer and KernelUser interfaces get special treatment here.
      *	On the kernel side of the interface, ports are really internal
@@ -216,24 +241,22 @@ itCalculateNameInfo(ipc_type_t *it)
      *	hand-conditionalizing on KERNEL_SERVER and KERNEL_USER.
      */
 
-    if (IsKernelServer &&
-	streql(it->itServerType, "mach_port_t") &&
-	(((it->itInName == MACH_MSG_TYPE_POLYMORPHIC) &&
-	  (it->itOutName == MACH_MSG_TYPE_POLYMORPHIC)) ||
-	 MACH_MSG_TYPE_PORT_ANY(it->itInName) ||
-	 MACH_MSG_TYPE_PORT_ANY(it->itOutName))) {
+    if (IsKernelServer && isServerPort) {
 	it->itServerType = "ipc_port_t";
-        it->itKernelPort = TRUE;
-    } else if (IsKernelUser &&
-	streql(it->itUserType, "mach_port_t") &&
-	(((it->itInName == MACH_MSG_TYPE_POLYMORPHIC) &&
-	  (it->itOutName == MACH_MSG_TYPE_POLYMORPHIC)) ||
-	 MACH_MSG_TYPE_PORT_ANY(it->itInName) ||
-	 MACH_MSG_TYPE_PORT_ANY(it->itOutName))) {
+        it->itKernelPort = true;
+    } else if (IsKernelUser && isUserPort) {
 	it->itUserType = "ipc_port_t";
-        it->itKernelPort = TRUE;
+        it->itKernelPort = true;
     } else
-        it->itKernelPort = FALSE;
+        it->itKernelPort = false;
+
+    /*
+     * In 64 bits, ports are inlined as 8 bytes even though mach_port_t or
+     * mach_port_name_t are always 4 bytes. We do this to avoid slow message
+     * resizing inside the gnumach by ensuring inlined port names in messages
+     * are always 8 bytes long.
+     */
+    it->itUserlandPort = isPortType && !IsKernelUser && !IsKernelServer;
 
     if (it->itTransType == strNULL)
 	it->itTransType = it->itServerType;
@@ -313,34 +336,36 @@ itUseLong(const ipc_type_t *it)
     if ((it->itVarArray && !it->itInLine) || it->itIndefinite)
 	uselong = ShouldBeLong;
 
+    /* Check that msgt_name fits into 1 byte as the x86_64 ABI requires it.
+       Note that MACH_MSG_TYPE_POLYMORPHIC is -1 hence it is ignored. */
     if (((it->itInName != MACH_MSG_TYPE_POLYMORPHIC) &&
 	 (it->itInName >= (1<<8))) ||
 	((it->itOutName != MACH_MSG_TYPE_POLYMORPHIC) &&
-	 (it->itOutName >= (1<<8))) ||
-	(it->itSize >= (1<<8)) ||
+	 (it->itOutName >= (1<<8)))) {
+        error("Cannot have msgt_name greater than 255");
+        uselong = TooLong;
+    }
+
+	if ((it->itSize >= (1<<8)) ||
 	(it->itNumber >= (1<<12)))
 	uselong = MustBeLong;
 
-    if (((it->itInName != MACH_MSG_TYPE_POLYMORPHIC) &&
-	 (it->itInName >= (1<<16))) ||
-	((it->itOutName != MACH_MSG_TYPE_POLYMORPHIC) &&
-	 (it->itOutName >= (1<<16))) ||
-	(it->itSize >= (1<<16)))
+    if (it->itSize >= (1<<16))
 	uselong = TooLong;
 
     return uselong;
 }
 
-boolean_t
-itCheckIsLong(const ipc_type_t *it, ipc_flags_t flags, boolean_t dfault,
+bool
+itCheckIsLong(const ipc_type_t *it, ipc_flags_t flags, bool dfault,
 	      identifier_t name)
 {
-    boolean_t islong = dfault;
+    bool islong = dfault;
 
     if (flags & flLong)
-	islong = TRUE;
+	islong = true;
     if (flags & flNotLong)
-	islong = FALSE;
+	islong = false;
 
     if (islong == dfault) {
 	if (flags & flLong)
@@ -406,7 +431,7 @@ itCheckDecl(identifier_t name, ipc_type_t *it)
 
     uselong = itUseLong(it);
     if (uselong == TooLong)
-	warn("%s: too big for mach_msg_type_long_t", name);
+	error("%s: too big for mach_msg_type_long_t", name);
     it->itLongForm = itCheckIsLong(it, it->itFlags,
 				   (int)uselong >= (int)ShouldBeLong, name);
 }
@@ -417,10 +442,10 @@ itCheckDecl(identifier_t name, ipc_type_t *it)
 static void
 itPrintTrans(const ipc_type_t *it)
 {
-    if (!streql(it->itName, it->itUserType))
+    if (it->itName != strNULL && it->itUserType != strNULL && !streql(it->itName, it->itUserType))
 	printf("\tCUserType:\t%s\n", it->itUserType);
 
-    if (!streql(it->itName, it->itServerType))
+    if (it->itName != strNULL && !streql(it->itName, it->itServerType))
 	printf("\tCServerType:\t%s\n", it->itServerType);
 
     if (it->itInTrans != strNULL)
@@ -525,10 +550,11 @@ itLongDecl(u_int inname, const_string_t instr, u_int outname,
     it->itOutName = outname;
     it->itOutNameStr = outstr;
     it->itSize = size;
+    it->itAlignment = MIN(complex_alignof, size / 8);
     if (inname == MACH_MSG_TYPE_STRING_C)
     {
-	it->itStruct = FALSE;
-	it->itString = TRUE;
+	it->itStruct = false;
+	it->itString = true;
     }
     it->itFlags = flags;
 
@@ -619,11 +645,11 @@ itVarArrayDecl(u_int number, const ipc_type_t *old)
 
 	bytes = (it->itNumber * it->itSize + 7) / 8;
 	it->itNumber = (2048 / bytes) * it->itNumber;
-	it->itIndefinite = TRUE;
+	it->itIndefinite = true;
     }
-    it->itVarArray = TRUE;
-    it->itStruct = FALSE;
-    it->itString = FALSE;
+    it->itVarArray = true;
+    it->itStruct = false;
+    it->itString = false;
 
     itCalculateSizeInfo(it);
     return it;
@@ -641,8 +667,9 @@ itArrayDecl(u_int number, const ipc_type_t *old)
     if (!it->itInLine || it->itVarArray)
 	error("IPC type decl is too complicated");
     it->itNumber *= number;
-    it->itStruct = FALSE;
-    it->itString = FALSE;
+    it->itStruct = false;
+    it->itString = false;
+    it->itAlignment = old->itAlignment;
 
     itCalculateSizeInfo(it);
     return it;
@@ -659,10 +686,11 @@ itPtrDecl(ipc_type_t *it)
 	(it->itVarArray && !it->itIndefinite && (it->itNumber > 0)))
 	error("IPC type decl is too complicated");
     it->itNumber = 0;
-    it->itIndefinite = FALSE;
-    it->itInLine = FALSE;
-    it->itStruct = TRUE;
-    it->itString = FALSE;
+    it->itIndefinite = false;
+    it->itInLine = false;
+    it->itStruct = true;
+    it->itString = false;
+    it->itAlignment = sizeof_pointer;
 
     itCalculateSizeInfo(it);
     return it;
@@ -673,15 +701,62 @@ itPtrDecl(ipc_type_t *it)
  *	type new = struct[number] of old;
  */
 ipc_type_t *
-itStructDecl(u_int number, const ipc_type_t *old)
+itStructArrayDecl(u_int number, const ipc_type_t *old)
 {
     ipc_type_t *it = itResetType(itCopyType(old));
 
     if (!it->itInLine || it->itVarArray)
 	error("IPC type decl is too complicated");
     it->itNumber *= number;
-    it->itStruct = TRUE;
-    it->itString = FALSE;
+    it->itStruct = true;
+    it->itString = false;
+    it->itAlignment = old->itAlignment;
+
+    itCalculateSizeInfo(it);
+    return it;
+}
+
+/*
+ *  Handles the declaration
+ *	type new = struct { type1 a1; type2 a2; ... };
+ */
+ipc_type_t *
+itStructDecl(u_int min_type_size_in_bytes, u_int required_alignment_in_bytes)
+{
+    int final_struct_bytes = min_type_size_in_bytes;
+    if (final_struct_bytes % required_alignment_in_bytes) {
+         final_struct_bytes += required_alignment_in_bytes - (final_struct_bytes % required_alignment_in_bytes);
+    }
+    ipc_type_t *element_type = NULL;
+    int number_elements = 0;
+    // If the struct is short or int aligned, use that as the base type.
+    switch (required_alignment_in_bytes) {
+	case 2:
+	    element_type = itShortType;
+	    assert(final_struct_bytes % 2 == 0);
+	    number_elements = final_struct_bytes / 2;
+	    break;
+	case 4:
+	    element_type = itIntType;
+	    assert(final_struct_bytes % 4 == 0);
+	    number_elements = final_struct_bytes / 4;
+	    break;
+	case 8:
+	    element_type = itInt64Type;
+	    assert(final_struct_bytes % 8 == 0);
+	    number_elements = final_struct_bytes / 8;
+	    break;
+        case 1:
+	default:
+	    element_type = itByteType;
+	    number_elements = final_struct_bytes;
+	    break;
+    }
+    ipc_type_t *it = itResetType(itCopyType(element_type));
+    it->itNumber = number_elements;
+    it->itStruct = true;
+    it->itString = false;
+    it->itAlignment = required_alignment_in_bytes;
 
     itCalculateSizeInfo(it);
     return it;
@@ -692,7 +767,7 @@ itStructDecl(u_int number, const ipc_type_t *old)
  * 'array[n] of (MSG_TYPE_STRING_C, 8)'
  */
 ipc_type_t *
-itCStringDecl(u_int count, boolean_t varying)
+itCStringDecl(u_int count, bool varying)
 {
     ipc_type_t *it;
     ipc_type_t *itElement;
@@ -707,8 +782,9 @@ itCStringDecl(u_int count, boolean_t varying)
     it = itResetType(itCopyType(itElement));
     it->itNumber = count;
     it->itVarArray = varying;
-    it->itStruct = FALSE;
-    it->itString = TRUE;
+    it->itStruct = false;
+    it->itString = true;
+    it->itAlignment = itElement->itAlignment;
 
     itCalculateSizeInfo(it);
     return it;
@@ -754,11 +830,12 @@ itMakeCountType(void)
     ipc_type_t *it = itAlloc();
 
     it->itName = "mach_msg_type_number_t";
-    it->itInName = word_size_name;
-    it->itInNameStr = word_size_name_string;
-    it->itOutName = word_size_name;
-    it->itOutNameStr = word_size_name_string;
-    it->itSize = word_size_in_bits;
+    it->itInName = int_name;
+    it->itInNameStr = int_name_string;
+    it->itOutName = int_name;
+    it->itOutNameStr = int_name_string;
+    it->itSize = sizeof_int * 8;
+    it->itAlignment = sizeof_int;
 
     itCalculateSizeInfo(it);
     itCalculateNameInfo(it);
@@ -771,11 +848,12 @@ itMakeNaturalType(const char *name)
     ipc_type_t *it = itAlloc();
 
     it->itName = name;
-    it->itInName = word_size_name;
-    it->itInNameStr = word_size_name_string;
-    it->itOutName = word_size_name;
-    it->itOutNameStr = word_size_name_string;
-    it->itSize = word_size_in_bits;
+    it->itInName = int_name;
+    it->itInNameStr = int_name_string;
+    it->itOutName = int_name;
+    it->itOutNameStr = int_name_string;
+    it->itSize = sizeof_int * 8;
+    it->itAlignment = sizeof_int;
 
     itCalculateSizeInfo(it);
     itCalculateNameInfo(it);
@@ -788,11 +866,12 @@ itMakePolyType(void)
     ipc_type_t *it = itAlloc();
 
     it->itName = "mach_msg_type_name_t";
-    it->itInName = word_size_name;
-    it->itInNameStr = word_size_name_string;
-    it->itOutName = word_size_name;
-    it->itOutNameStr = word_size_name_string;
-    it->itSize = word_size_in_bits;
+    it->itInName = int_name;
+    it->itInNameStr = int_name_string;
+    it->itOutName = int_name;
+    it->itOutNameStr = int_name_string;
+    it->itSize = sizeof_int * 8;
+    it->itAlignment = sizeof_int;
 
     itCalculateSizeInfo(it);
     itCalculateNameInfo(it);
@@ -809,7 +888,8 @@ itMakeDeallocType(void)
     it->itInNameStr = "MACH_MSG_TYPE_BOOLEAN";
     it->itOutName = MACH_MSG_TYPE_BOOLEAN;
     it->itOutNameStr = "MACH_MSG_TYPE_BOOLEAN";
-    it->itSize = 32;
+    it->itSize = sizeof_int * 8;
+    it->itAlignment = sizeof_int;
 
     itCalculateSizeInfo(it);
     itCalculateNameInfo(it);
@@ -822,13 +902,33 @@ itMakeDeallocType(void)
 void
 init_type(void)
 {
+    if (types_initialized)
+    {
+        error("Basic types were already initialized");
+        exit(EXIT_FAILURE);
+    }
+    /* Mark initialization here since itInsert below will require it. */
+    types_initialized = true;
+
+    itByteType = itAlloc();
+    itByteType->itName = "unsigned char";
+    itByteType->itInName = MACH_MSG_TYPE_BYTE;
+    itByteType->itInNameStr = "MACH_MSG_TYPE_BYTE";
+    itByteType->itOutName = MACH_MSG_TYPE_BYTE;
+    itByteType->itOutNameStr = "MACH_MSG_TYPE_BYTE";
+    itByteType->itSize = sizeof_char * 8;
+    itByteType->itAlignment = sizeof_char;
+    itCalculateSizeInfo(itByteType);
+    itCalculateNameInfo(itByteType);
+
     itRetCodeType = itAlloc();
     itRetCodeType->itName = "kern_return_t";
-    itRetCodeType->itInName = MACH_MSG_TYPE_INTEGER_32;
-    itRetCodeType->itInNameStr = "MACH_MSG_TYPE_INTEGER_32";
-    itRetCodeType->itOutName = MACH_MSG_TYPE_INTEGER_32;
-    itRetCodeType->itOutNameStr = "MACH_MSG_TYPE_INTEGER_32";
-    itRetCodeType->itSize = 32;
+    itRetCodeType->itInName = int_name;
+    itRetCodeType->itInNameStr = int_name_string;
+    itRetCodeType->itOutName = int_name;
+    itRetCodeType->itOutNameStr = int_name_string;
+    itRetCodeType->itSize = sizeof_int * 8;
+    itRetCodeType->itAlignment = sizeof_int;
     itCalculateSizeInfo(itRetCodeType);
     itCalculateNameInfo(itRetCodeType);
 
@@ -838,7 +938,8 @@ init_type(void)
     itDummyType->itInNameStr = "MACH_MSG_TYPE_UNSTRUCTURED";
     itDummyType->itOutName = MACH_MSG_TYPE_UNSTRUCTURED;
     itDummyType->itOutNameStr = "MACH_MSG_TYPE_UNSTRUCTURED";
-    itDummyType->itSize = word_size_in_bits;
+    itDummyType->itSize = complex_alignof * 8;
+    itDummyType->itAlignment = complex_alignof;
     itCalculateSizeInfo(itDummyType);
     itCalculateNameInfo(itDummyType);
 
@@ -848,7 +949,8 @@ init_type(void)
     itRequestPortType->itInNameStr = "MACH_MSG_TYPE_COPY_SEND";
     itRequestPortType->itOutName = MACH_MSG_TYPE_PORT_SEND;
     itRequestPortType->itOutNameStr = "MACH_MSG_TYPE_PORT_SEND";
-    itRequestPortType->itSize = word_size_in_bits;
+    itRequestPortType->itSize = port_size_in_bits;
+    itRequestPortType->itAlignment = port_size;
     itCalculateSizeInfo(itRequestPortType);
     itCalculateNameInfo(itRequestPortType);
 
@@ -858,7 +960,8 @@ init_type(void)
     itZeroReplyPortType->itInNameStr = "0";
     itZeroReplyPortType->itOutName = 0;
     itZeroReplyPortType->itOutNameStr = "0";
-    itZeroReplyPortType->itSize = word_size_in_bits;
+    itZeroReplyPortType->itSize = port_size_in_bits;
+    itZeroReplyPortType->itAlignment = port_size;
     itCalculateSizeInfo(itZeroReplyPortType);
     itCalculateNameInfo(itZeroReplyPortType);
 
@@ -868,7 +971,8 @@ init_type(void)
     itRealReplyPortType->itInNameStr = "MACH_MSG_TYPE_MAKE_SEND_ONCE";
     itRealReplyPortType->itOutName = MACH_MSG_TYPE_PORT_SEND_ONCE;
     itRealReplyPortType->itOutNameStr = "MACH_MSG_TYPE_PORT_SEND_ONCE";
-    itRealReplyPortType->itSize = word_size_in_bits;
+    itRealReplyPortType->itSize = port_size_in_bits;
+    itRealReplyPortType->itAlignment = port_size;
     itCalculateSizeInfo(itRealReplyPortType);
     itCalculateNameInfo(itRealReplyPortType);
 
@@ -877,8 +981,16 @@ init_type(void)
 
     /* Define basic C integral types. */
     itInsert("char", itCIntTypeDecl("char", sizeof_char));
-    itInsert("short", itCIntTypeDecl("short", sizeof_short));
-    itInsert("int", itCIntTypeDecl("int", sizeof_int));
+    itShortType = itCIntTypeDecl("short", sizeof_short);
+    itInsert("short", itShortType);
+    itIntType = itCIntTypeDecl("int", sizeof_int);
+    itInsert("int", itIntType);
+    itInt64Type = itCIntTypeDecl("int64", sizeof_int64_t);
+    itInsert("int64", itInt64Type);
+    itUintPtrType = itCIntTypeDecl("uintptr_t", sizeof_uintptr_t);
+    itInsert("uintptr_t", itUintPtrType);
+    itIntPtrType = itCIntTypeDecl("intptr_t", sizeof_intptr_t);
+    itInsert("intptr_t", itIntPtrType);
 }
 
 /******************************************************
@@ -906,7 +1018,7 @@ itCheckRequestPortType(identifier_t name, const ipc_type_t *it)
 	 (it->itOutName != MACH_MSG_TYPE_PORT_SEND_ONCE) &&
 	 (it->itOutName != MACH_MSG_TYPE_POLYMORPHIC)) ||
 	(it->itNumber != 1) ||
-	(it->itSize != word_size_in_bits) ||
+	(it->itSize != port_size_in_bits) ||
 	!it->itInLine ||
 	it->itDeallocate != d_NO ||
 	!it->itStruct ||
@@ -927,7 +1039,7 @@ itCheckReplyPortType(identifier_t name, const ipc_type_t *it)
 	 (it->itOutName != MACH_MSG_TYPE_POLYMORPHIC) &&
 	 (it->itOutName != 0)) ||
 	(it->itNumber != 1) ||
-	(it->itSize != word_size_in_bits) ||
+	(it->itSize != port_size_in_bits) ||
 	!it->itInLine ||
 	it->itDeallocate != d_NO ||
 	!it->itStruct ||
@@ -943,8 +1055,8 @@ itCheckReplyPortType(identifier_t name, const ipc_type_t *it)
 void
 itCheckIntType(identifier_t name, const ipc_type_t *it)
 {
-    if ((it->itInName != MACH_MSG_TYPE_INTEGER_32) ||
-	(it->itOutName != MACH_MSG_TYPE_INTEGER_32) ||
+    if ((it->itInName != int_name) ||
+	(it->itOutName != int_name) ||
 	(it->itNumber != 1) ||
 	(it->itSize != 32) ||
 	!it->itInLine ||
@@ -954,17 +1066,15 @@ itCheckIntType(identifier_t name, const ipc_type_t *it)
 	error("argument %s isn't a proper integer", name);
 }
 void
-itCheckNaturalType(name, it)
-    identifier_t name;
-    ipc_type_t *it;
+itCheckNaturalType(identifier_t name, ipc_type_t *it)
 {
-    if ((it->itInName != word_size_name) ||
-	(it->itOutName != word_size_name) ||
+    if ((it->itInName != int_name) ||
+	(it->itOutName != int_name) ||
 	(it->itNumber != 1) ||
-	(it->itSize != word_size_in_bits) ||
+	(it->itSize != sizeof_int * 8) ||
 	!it->itInLine ||
 	it->itDeallocate != d_NO ||
 	!it->itStruct ||
 	it->itVarArray)
-	error("argument %s should have been a %s", name, word_size_name_string);
+	error("argument %s should have been a %s", name, int_name_string);
 }

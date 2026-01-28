@@ -25,9 +25,10 @@
  */
 
 #include <sys/types.h>
+#include <stdbool.h>
 #include <stdlib.h>
+#include <ctype.h>
 
-#include "boolean.h"
 #include "error.h"
 #include "mig_string.h"
 
@@ -61,9 +62,9 @@ strfree(string_t string)
 }
 
 const char *
-strbool(boolean_t bool)
+strbool(bool v)
 {
-    if (bool)
+    if (v)
 	return "TRUE";
     else
 	return "FALSE";
@@ -76,4 +77,14 @@ strstring(const_string_t string)
 	return "NULL";
     else
 	return string;
+}
+
+char *
+strupper(const_string_t string)
+{
+    string_t upper = strmake(string);
+
+    for (int i=0; i<strlen(upper); i++)
+        upper[i] = toupper(upper[i]);
+    return upper;
 }

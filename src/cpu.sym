@@ -30,6 +30,7 @@
  * Fetch values from the Mach header.
  */
 #include <mach/message.h>
+#include <stdint.h>
 
 /*
  *	Known values for the msgt_name field.
@@ -94,15 +95,22 @@ expr MACH_MSG_TYPE_POLYMORPHIC
 
 
 /* Types used in interfaces */
-expr sizeof(integer_t)			word_size
-expr (sizeof(integer_t)*8)		word_size_in_bits
+expr sizeof(uintptr_t)			desired_complex_alignof
 expr sizeof(void*)			sizeof_pointer
 expr sizeof(char)			sizeof_char
 expr sizeof(short)			sizeof_short
 expr sizeof(int)			sizeof_int
 expr sizeof(long)			sizeof_long
+expr sizeof(int64_t)			sizeof_int64_t
 expr sizeof(float)			sizeof_float
 expr sizeof(double)			sizeof_double
+expr sizeof(uintptr_t)			sizeof_uintptr_t
+expr sizeof(intptr_t)			sizeof_intptr_t
+expr (sizeof(uintptr_t)*8)		sizeof_uintptr_t_in_bits
 expr sizeof(mach_msg_header_t)		sizeof_mach_msg_header_t
 expr sizeof(mach_msg_type_long_t)	sizeof_mach_msg_type_long_t
 expr sizeof(mach_msg_type_t)		sizeof_mach_msg_type_t
+expr sizeof(vm_offset_t)		vm_offset_size
+expr (sizeof(vm_offset_t)*8)		vm_offset_size_in_bits
+expr sizeof(mach_port_name_t)		port_name_size
+expr (sizeof(mach_port_name_t)*8)	port_name_size_in_bits

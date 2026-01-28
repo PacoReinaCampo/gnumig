@@ -170,53 +170,55 @@ WriteEpilog(FILE *file, const statement_t *stats)
      fprintf(file, "\n");
 
      /*
-      * Then, the server routine
+      * Then, the server routine. Only write them if it's a user server since the kernel
+      * relies only on the routines above.
       */
-    fprintf(file, "mig_external boolean_t %s\n", ServerDemux);
-    fprintf(file, "\t(mach_msg_header_t *InHeadP, mach_msg_header_t *OutHeadP)\n");
+    if (!IsKernelServer) {
+        fprintf(file, "mig_external boolean_t %s\n", ServerDemux);
+        fprintf(file, "\t(mach_msg_header_t *InHeadP, mach_msg_header_t *OutHeadP)\n");
 
-    fprintf(file, "{\n");
-    fprintf(file, "\tmach_msg_header_t *InP =  InHeadP;\n");
+        fprintf(file, "{\n");
+        fprintf(file, "\tmach_msg_header_t *InP =  InHeadP;\n");
 
-    fprintf(file, "\tmig_reply_header_t *OutP = (mig_reply_header_t *) OutHeadP;\n");
+        fprintf(file, "\tmig_reply_header_t *OutP = (mig_reply_header_t *) OutHeadP;\n");
 
-    fprintf(file, "\n");
+        fprintf(file, "\n");
 
-    WriteStaticDecl(file, itRetCodeType,
-		    itRetCodeType->itDeallocate, itRetCodeType->itLongForm,
-		    !IsKernelServer, "RetCodeType");
-    fprintf(file, "\n");
+        WriteStaticDecl(file, itRetCodeType,
+                itRetCodeType->itDeallocate, itRetCodeType->itLongForm,
+                /*is_server=*/ true, !IsKernelServer, "RetCodeType");
+        fprintf(file, "\n");
 
-    fprintf(file, "\tmig_routine_t routine;\n");
-    fprintf(file, "\n");
+        fprintf(file, "\tmig_routine_t routine;\n");
+        fprintf(file, "\n");
 
-    fprintf(file, "\tOutP->Head.msgh_bits = ");
-    fprintf(file, "MACH_MSGH_BITS(MACH_MSGH_BITS_REPLY(InP->msgh_bits), 0);\n");
-    fprintf(file, "\tOutP->Head.msgh_size = sizeof *OutP;\n");
-    fprintf(file, "\tOutP->Head.msgh_remote_port = InP->msgh_reply_port;\n");
-    fprintf(file, "\tOutP->Head.msgh_local_port = MACH_PORT_NULL;\n");
-    fprintf(file, "\tOutP->Head.msgh_seqno = 0;\n");
-    fprintf(file, "\tOutP->Head.msgh_id = InP->msgh_id + 100;\n");
-    fprintf(file, "\n");
-    WritePackMsgType(file, itRetCodeType,
-		     itRetCodeType->itDeallocate, itRetCodeType->itLongForm,
-		     !IsKernelServer, "OutP->RetCodeType", "RetCodeType");
-    fprintf(file, "\n");
+        fprintf(file, "\tOutP->Head.msgh_bits = ");
+        fprintf(file, "MACH_MSGH_BITS(MACH_MSGH_BITS_REPLY(InP->msgh_bits), 0);\n");
+        fprintf(file, "\tOutP->Head.msgh_size = sizeof *OutP;\n");
+        fprintf(file, "\tOutP->Head.msgh_remote_port = InP->msgh_reply_port;\n");
+        fprintf(file, "\tOutP->Head.msgh_local_port = MACH_PORT_NULL;\n");
+        fprintf(file, "\tOutP->Head.msgh_seqno = 0;\n");
+        fprintf(file, "\tOutP->Head.msgh_id = InP->msgh_id + 100;\n");
+        fprintf(file, "\n");
+        WritePackMsgType(file, itRetCodeType,
+                itRetCodeType->itDeallocate, itRetCodeType->itLongForm,
+                !IsKernelServer, "OutP->RetCodeType", "RetCodeType");
+        fprintf(file, "\n");
 
-    fprintf(file, "\tif ((InP->msgh_id > %d) || (InP->msgh_id < %d) ||\n",
-	    SubsystemBase + rtNumber - 1, SubsystemBase);
-    fprintf(file, "\t    ((routine = %s_routines[InP->msgh_id - %d]) == 0)) {\n",
-	    ServerDemux, SubsystemBase);
-    fprintf(file, "\t\tOutP->RetCode = MIG_BAD_ID;\n");
-    fprintf(file, "\t\treturn FALSE;\n");
-    fprintf(file, "\t}\n");
+        fprintf(file, "\tif ((InP->msgh_id > %d) || (InP->msgh_id < %d) ||\n",
+                SubsystemBase + rtNumber - 1, SubsystemBase);
+        fprintf(file, "\t    ((routine = %s_routines[InP->msgh_id - %d]) == 0)) {\n",
+                ServerDemux, SubsystemBase);
+        fprintf(file, "\t\tOutP->RetCode = MIG_BAD_ID;\n");
+        fprintf(file, "\t\treturn FALSE;\n");
+        fprintf(file, "\t}\n");
 
-    /* Call appropriate routine */
-    fprintf(file, "\t(*routine) (InP, &OutP->Head);\n");
-    fprintf(file, "\treturn TRUE;\n");
-    fprintf(file, "}\n");
-    fprintf(file, "\n");
-
+        /* Call appropriate routine */
+        fprintf(file, "\t(*routine) (InP, &OutP->Head);\n");
+        fprintf(file, "\treturn TRUE;\n");
+        fprintf(file, "}\n");
+        fprintf(file, "\n");
+	}
     /* symtab */
 
     if (GenSymTab) {
@@ -268,8 +270,9 @@ WriteLocalPtrDecl(FILE *file, const argument_t *arg)
 static void
 WriteServerArgDecl(FILE *file, const argument_t *arg)
 {
-    fprintf(file, "%s %s%s",
-	    arg->argType->itTransType,
+    const char *qualif = ServerVarQualifier(arg);
+    fprintf(file, "%s%s %s%s",
+	    qualif, arg->argType->itTransType,
 	    arg->argByReferenceServer ? "*" : "",
 	    arg->argVarName);
 }
@@ -282,8 +285,8 @@ static void
 WriteVarDecls(FILE *file, const routine_t *rt)
 {
     int i;
-    boolean_t NeedMsghSize = FALSE;
-    boolean_t NeedMsghSizeDelta = FALSE;
+    bool NeedMsghSize = false;
+    bool NeedMsghSizeDelta = false;
 
     fprintf(file, "\tRequest *In0P = (Request *) InHeadP;\n");
     for (i = 1; i <= rt->rtMaxRequestPos; i++)
@@ -311,14 +314,14 @@ WriteVarDecls(FILE *file, const routine_t *rt)
        msgh_size_delta and msgh_size */
 
     if (rt->rtNumRequestVar > 0)
-	NeedMsghSize = TRUE;
+	NeedMsghSize = true;
     if (rt->rtMaxRequestPos > 0)
-	NeedMsghSizeDelta = TRUE;
+	NeedMsghSizeDelta = true;
 
     if (rt->rtNumReplyVar > 1)
-	NeedMsghSize = TRUE;
+	NeedMsghSize = true;
     if (rt->rtMaxReplyPos > 0)
-	NeedMsghSizeDelta = TRUE;
+	NeedMsghSizeDelta = true;
 
     if (NeedMsghSize)
 	fprintf(file, "\tunsigned int msgh_size;\n");
@@ -338,13 +341,13 @@ WriteMsgError(FILE *file, const char *error_msg)
 static void
 WriteReplyInit(FILE *file, const routine_t *rt)
 {
-    boolean_t printed_nl = FALSE;
+    bool printed_nl = false;
 
     if (rt->rtSimpleFixedReply)
     {
 	if (!rt->rtSimpleSendReply) /* complex reply message */
 	{
-	    printed_nl = TRUE;
+	    printed_nl = true;
 	    fprintf(file, "\n");
 	    fprintf(file,
 		"\tOutP->Head.msgh_bits |= MACH_MSGH_BITS_COMPLEX;\n");
@@ -352,7 +355,7 @@ WriteReplyInit(FILE *file, const routine_t *rt)
     }
     else
     {
-	printed_nl = TRUE;
+	printed_nl = true;
 	fprintf(file, "\n");
 	fprintf(file, "\tmsgh_simple = %s;\n",
 			  strbool(rt->rtSimpleSendReply));
@@ -452,10 +455,27 @@ WriteTypeCheck(FILE *file, const argument_t *arg)
 		    arg->argRequestPos, arg->argTTName,
 		    arg->argLongForm ? "l" : "",
 		    it->itNumber);
-	fprintf(file, "\t    (In%dP->%s.msgt%s_size != %d)))\n",
-		arg->argRequestPos, arg->argTTName,
-		arg->argLongForm ? "l" : "",
-		it->itSize);
+	if (IS_64BIT_ABI && it->itUserlandPort && arg->argLongForm) {
+	    /* 64 bit inlined ports are 8 bytes long but we use mach_port_name_t when passing them out of line. */
+	    fprintf(file, "\t    (In%dP->%s.msgtl_size != %d && In%dP->%s.msgtl_header.msgt_inline == TRUE) || \n",
+		    arg->argRequestPos,
+		    arg->argTTName,
+		    it->itSize,
+		    arg->argRequestPos,
+		    arg->argTTName);
+	    fprintf(file, "\t    (In%dP->%s.msgtl_size != %d && In%dP->%s.msgtl_header.msgt_inline == FALSE)",
+		    arg->argRequestPos,
+		    arg->argTTName,
+		    port_name_size_in_bits,
+		    arg->argRequestPos,
+		    arg->argTTName);
+	} else {
+	    fprintf(file, "\t    (In%dP->%s.msgt%s_size != %d)",
+		    arg->argRequestPos, arg->argTTName,
+		    arg->argLongForm ? "l" : "",
+		    it->itSize);
+	}
+	fprintf(file, "))\n");
     }
     WriteMsgError(file, "MIG_BAD_ARGUMENTS");
     fprintf(file, "#endif\t/* TypeCheck */\n");
@@ -480,7 +500,7 @@ WriteCheckArgSize(FILE *file, const argument_t *arg)
 		arg->argLongForm ? ".msgtl_header" : "");
     }
 
-    if (btype->itTypeSize % word_size != 0)
+    if (btype->itTypeSize % complex_alignof != 0)
 	fprintf(file, "(");
 
     if (multiplier > 1)
@@ -488,10 +508,10 @@ WriteCheckArgSize(FILE *file, const argument_t *arg)
 
     fprintf(file, "In%dP->%s", arg->argRequestPos, count->argMsgField);
 
-    /* If the base type size of the data field isn`t a multiple of word_size,
+    /* If the base type size of the data field isn`t a multiple of complex_alignof,
        we have to round up. */
-    if (btype->itTypeSize % word_size != 0)
-	fprintf(file, " + %d) & ~%d", word_size - 1, word_size - 1);
+    if (btype->itTypeSize % complex_alignof != 0)
+	fprintf(file, " + %zd) & ~%zdU", complex_alignof - 1, complex_alignof - 1);
 
     if (ptype->itIndefinite) {
 	fprintf(file, " : sizeof(%s *)", FetchServerType(btype));
@@ -524,11 +544,11 @@ WriteCheckMsgSize(FILE *file, const argument_t *arg)
 	   then we must check for exact msg-size and we don't need to
 	   update msgh_size. */
 
-	boolean_t LastVarArg = arg->argRequestPos+1 == rt->rtNumRequestVar;
+	bool LastVarArg = arg->argRequestPos+1 == rt->rtNumRequestVar;
 
 	/* calculate the actual size in bytes of the data field.  note
-	   that this quantity must be a multiple of word_size.  hence, if
-	   the base type size isn't a multiple of word_size, we have to
+	   that this quantity must be a multiple of complex_alignof.  hence, if
+	   the base type size isn't a multiple of complex_alignof, we have to
 	   round up.  note also that btype->itNumber must
 	   divide btype->itTypeSize (see itCalculateSizeInfo). */
 
@@ -585,7 +605,10 @@ static void
 WriteExtractArgValue(FILE *file, const argument_t *arg)
 {
     const ipc_type_t *it = arg->argType;
-    boolean_t have_payload;
+    const bool is_inlined_port = it->itUserlandPort && it->itInLine &&
+		akIdent(arg->argKind) != akeRequestPort && akIdent(arg->argKind) != akeReplyPort;
+    const char* arg_suffix = is_inlined_port ? ".name" : "";
+    bool have_payload;
 
     if (arg->argMultiplier > 1)
 	WriteCopyType(file, it, "%s", "/* %s */ %s / %d",
@@ -615,17 +638,18 @@ WriteExtractArgValue(FILE *file, const argument_t *arg)
 		fprintf(file, "\t%s = %s;",
 			arg->argVarName, InArgMsgField(arg));
 	    else
-		WriteCopyType(file, it, "%s", "/* %s */ %s(%s)",
+		WriteCopyType(file, it, "%s", "/* %s */ %s(%s%s)",
 			      arg->argVarName, it->itInTrans,
-			      InArgMsgField(arg));
+			      InArgMsgField(arg), arg_suffix);
 	} else {
-	    WriteCopyType(file, it, "%s", "/* %s */ %s(%s)",
+	    WriteCopyType(file, it, "%s", "/* %s */ %s(%s%s)",
 			  arg->argVarName, it->itInTrans,
-			  InArgMsgField(arg));
+			  InArgMsgField(arg), arg_suffix);
 	}
-    } else
-	WriteCopyType(file, it, "%s", "/* %s */ %s",
-		      arg->argVarName, InArgMsgField(arg));
+    } else {
+	WriteCopyType(file, it, "%s", "/* %s */ %s%s",
+		      arg->argVarName, InArgMsgField(arg), arg_suffix);
+    }
     fprintf(file, "\n");
 }
 
@@ -666,8 +690,10 @@ WriteInitializePtr(FILE *file, const argument_t *arg)
 	fprintf(file, "\t%sP = %s;\n",
 		arg->argVarName, arg->argVarName);
     else
-	fprintf(file, "\t%sP = OutP->%s;\n",
-		arg->argVarName, arg->argMsgField);
+	fprintf(file, "\t%sP = %sOutP->%s;\n",
+		arg->argVarName,
+		arg->argType->itUserlandPort ? "(mach_port_t *)" : "",
+		arg->argMsgField);
 }
 
 static void
@@ -740,15 +766,66 @@ WriteExtractArg(FILE *file, const argument_t *arg)
 	    WriteInitializeCount(file, arg);
     }
 
+    /* Ensure strings are null-terminated */
+    const ipc_type_t *it = arg->argType;
+    if (akCheck(arg->argKind, akbSend) && it->itString && !it->itVarArray) {
+	const size_t total_bytes = (it->itSize * it->itNumber)/8;
+	fprintf(file, "\t/* Ensure %s is null-terminated */\n", arg->argVarName);
+	fprintf(file, "\t%s[%d] = \'\\0\';\n", InArgMsgField(arg), total_bytes - 1);
+    }
+
     if (akCheckAll(arg->argKind, akbReturnSnd|akbPointer))
 	WriteInitializePtr(file, arg);
+    if (akCheckAll(arg->argKind, akbSendRcv|akbPointer)) {
+	if (akCheck(arg->argKind, akbIndefinite)) {
+	    fprintf(file, "\tif (In%dP->%s%s.msgt_inline) {\n",
+		    arg->argRequestPos, arg->argTTName, arg->argLongForm ? ".msgtl_header" : "");
+	    fprintf(file, "\t\t%sP = (mach_port_t *)%s;\n", arg->argVarName, InArgMsgField(arg));
+	    fprintf(file, "\t\tmach_msg_type_number_t i;\n");
+	    fprintf(file, "\t\t/* Resizes the mach_port_name_inlined_t input array as an array of mach_port_name_t. */\n");
+	    fprintf(file, "\t\tfor (i = 1; i < In%dP->%s.msgt%s_number; i++) {\n",
+		    arg->argRequestPos, arg->argTTName, arg->argLongForm ? "l" : "");
+	    fprintf(file, "\t\t\t%sP[i] = %s[i].name;\n", arg->argVarName, InArgMsgField(arg));
+	    fprintf(file, "\t\t}\n");
+	    fprintf(file, "\t} else {\n");
+	    fprintf(file, "\t\t%sP = %s%s;\n", arg->argVarName, InArgMsgField(arg), OOLPostfix);
+	    fprintf(file, "\t}\n");
+	}
+	else
+	    assert(false);
+    }
+}
+
+static void
+WriteRestoreArg(FILE *file, const argument_t *arg)
+{
+    if (akCheckAll(arg->argKind, akbSendRcv|akbPointer)) {
+	if (akCheck(arg->argKind, akbIndefinite)) {
+	    fprintf(file, "\tif (OutP->%s != KERN_SUCCESS && In%dP->%s%s.msgt_inline) {\n",
+		    arg->argRoutine->rtRetCode->argMsgField,
+		    arg->argRequestPos, arg->argTTName, arg->argLongForm ? ".msgtl_header" : "");
+	    fprintf(file, "\t\tmach_msg_type_number_t i;\n");
+	    fprintf(file, "\t\t/* Restore the mach_port_name_inlined_t input array for message destruction. */\n");
+	    fprintf(file, "\t\tfor (i = In%dP->%s.msgt%s_number; i > 1; i--) {\n",
+		    arg->argRequestPos, arg->argTTName, arg->argLongForm ? "l" : "");
+	    fprintf(file, "\t\t\t%s[i-1].name = %sP[i-1];\n", InArgMsgField(arg), arg->argVarName);
+	    fprintf(file, "\t\t}\n");
+	    fprintf(file, "\t}\n");
+	}
+	else
+	    assert(false);
+    }
 }
 
 static void
 WriteServerCallArg(FILE *file, const argument_t *arg)
 {
     const ipc_type_t *it = arg->argType;
-    boolean_t NeedClose = FALSE;
+    const bool is_inlined_port = it->itUserlandPort &&
+		akIdent(arg->argKind) != akeRequestPort && akIdent(arg->argKind) != akeReplyPort && it->itInLine;
+    const char* arg_suffix = is_inlined_port ? ".name" : "";
+
+    bool NeedClose = false;
 
     if (IsKernelServer) {
         /* If the type (incl. array) is handled differently, then we need to
@@ -770,7 +847,7 @@ WriteServerCallArg(FILE *file, const argument_t *arg)
 	!akCheck(arg->argKind, akbVarNeeded))
     {
 	fprintf(file, "%s(", it->itInTrans);
-	NeedClose = TRUE;
+	NeedClose = true;
     }
 
     if (akCheck(arg->argKind, akbPointer))
@@ -783,16 +860,17 @@ WriteServerCallArg(FILE *file, const argument_t *arg)
 		    arg->argRequestPos,
 		    arg->argTTName,
 		    arg->argLongForm ? ".msgtl_header" : "");
-	    fprintf(file, "? %s ", InArgMsgField(arg));
+	    fprintf(file, "? %s%s ", it->itUserlandPort ? "(mach_port_t *)" : "",
+				InArgMsgField(arg));
 	    fprintf(file, ": %s%s",
 		    InArgMsgField(arg),
 		    OOLPostfix);
 	}
 	else
-	    fprintf(file, "%s", InArgMsgField(arg));
+	    fprintf(file, "%s%s", InArgMsgField(arg), arg_suffix);
     }
     else
-	fprintf(file, "OutP->%s", arg->argMsgField);
+	fprintf(file, "OutP->%s%s", arg->argMsgField, arg_suffix);
 
     if (NeedClose)
 	fprintf(file, ")");
@@ -815,7 +893,7 @@ WriteDestroyArg(FILE *file, const argument_t *arg)
 	 */
 	argument_t *count = arg->argCount;
 	ipc_type_t *btype = it->itElement;
-	int	multiplier = btype->itTypeSize / btype->itNumber;
+	int	multiplier = it->itUserlandPort ? port_name_size : btype->itTypeSize / btype->itNumber;
 
 	fprintf(file, "\tif (OutP->%s == KERN_SUCCESS)\n",
 		arg->argRoutine->rtRetCode->argMsgField);
@@ -863,7 +941,7 @@ WriteDestroyPortArg(FILE *file, const argument_t *arg)
 /*
  * Check whether WriteDestroyPortArg would generate any code for arg.
  */
-static boolean_t
+static bool
 CheckDestroyPortArg(const argument_t *arg)
 {
     const ipc_type_t *it = arg->argType;
@@ -871,15 +949,15 @@ CheckDestroyPortArg(const argument_t *arg)
     if ((it->itInTrans != strNULL) &&
 	(it->itOutName == MACH_MSG_TYPE_PORT_SEND))
     {
-	return TRUE;
+	return true;
     }
-    return FALSE;
+    return false;
 }
 
 static void
 WriteServerCall(FILE *file, const routine_t *rt)
 {
-    boolean_t NeedClose = FALSE;
+    bool NeedClose = false;
 
     fprintf(file, "\t");
     if (rt->rtServerReturn != argNULL)
@@ -891,7 +969,7 @@ WriteServerCall(FILE *file, const routine_t *rt)
 	if (it->itOutTrans != strNULL)
 	{
 	    fprintf(file, "%s(", it->itOutTrans);
-	    NeedClose = TRUE;
+	    NeedClose = true;
 	}
     }
     fprintf(file, "%s(", rt->rtServerName);
@@ -935,6 +1013,8 @@ static void
 WritePackArgValue(FILE *file, const argument_t *arg)
 {
     const ipc_type_t *it = arg->argType;
+    const bool is_inlined_port = it->itUserlandPort && it->itInLine;
+    const char* arg_suffix = is_inlined_port ? ".name" : "";
 
     fprintf(file, "\n");
 
@@ -962,6 +1042,7 @@ WritePackArgValue(FILE *file, const argument_t *arg)
 	else {
 	    argument_t *count = arg->argCount;
 	    ipc_type_t *btype = it->itElement;
+	    const bool is_64bit_port = IS_64BIT_ABI && btype->itUserlandPort;
 
 	    /* Note btype->itNumber == count->argMultiplier */
 
@@ -985,23 +1066,41 @@ WritePackArgValue(FILE *file, const argument_t *arg)
 			    arg->argTTName,
 			    arg->argLongForm ? ".msgtl_header" : "",
 			    arg->argDealloc->argVarName);
+		if (is_64bit_port) {
+		    /* We are passing the ports out of line, so they will always have the same size as a port name. */
+		    fprintf(file, "\t\tOutP->%s%s.msgt_size = %d;\n",
+			    arg->argTTName,
+			    arg->argLongForm ? ".msgtl_header" : "",
+			    port_name_size_in_bits);
+		}
 		fprintf(file, "\t\tOutP->%s%s = %sP;\n",
-			arg->argMsgField,
-			OOLPostfix,
-			arg->argVarName);
+		    arg->argMsgField,
+		    OOLPostfix,
+		    arg->argVarName);
 		if (!arg->argRoutine->rtSimpleFixedReply)
 		    fprintf(file, "\t\tmsgh_simple = FALSE;\n");
-		fprintf(file, "\t}\n\telse {\n\t");
+		fprintf(file, "\t}\n\telse {\n");
 	    }
-	    fprintf(file, "\tmemcpy(OutP->%s, %s, ",
-		    arg->argMsgField, arg->argVarName);
-	    if (btype->itTypeSize > 1)
-		fprintf(file, "%d * ",
-			btype->itTypeSize);
-	    fprintf(file, "%s);\n",
-		count->argVarName);
-	    if (it->itIndefinite)
-		fprintf(file, "\t}\n");
+	    fprintf(file, "\t\tif (%s) {\n", count->argVarName);
+	    if (it->itIndefinite) {
+		if (is_64bit_port) {
+		    fprintf(file, "\t\t\t/* Copy array of mach_port_name_t into mach_port_name_inlined_t. */\n");
+		    fprintf(file, "\t\t\tmach_msg_type_number_t i;\n");
+		    fprintf(file, "\t\t\tfor(i = 0; i < %s; i++) {\n", count->argVarName);
+		    fprintf(file, "\t\t\t\t/* Clear the whole message with zeros. */\n");
+		    fprintf(file, "\t\t\t\tOutP->%s[i].kernel_port_do_not_use = 0;\n", arg->argMsgField);
+		    fprintf(file, "\t\t\t\tOutP->%s[i].name = %s[i];\n", arg->argMsgField, arg->argVarName);
+		    fprintf(file, "\t\t\t}\n");
+		} else {
+		    fprintf(file, "\t\t\tmemcpy(OutP->%s, %s, ",
+				arg->argMsgField, arg->argVarName);
+		    if (btype->itTypeSize > 1)
+			fprintf(file, "%d * ", btype->itTypeSize);
+		    fprintf(file, "%s);\n", count->argVarName);
+		}
+	    }
+	    fprintf(file, "\t\t}\n");
+	    fprintf(file, "\t}\n");
 	}
     }
     else if (arg->argMultiplier > 1)
@@ -1009,12 +1108,12 @@ WritePackArgValue(FILE *file, const argument_t *arg)
 		      arg->argMsgField,
 		      arg->argMultiplier,
 		      arg->argVarName);
-    else if (it->itOutTrans != strNULL)
-	WriteCopyType(file, it, "OutP->%s", "/* %s */ %s(%s)",
-		      arg->argMsgField, it->itOutTrans, arg->argVarName);
-    else
-	WriteCopyType(file, it, "OutP->%s", "/* %s */ %s",
-		      arg->argMsgField, arg->argVarName);
+    else if (it->itOutTrans != strNULL) {
+	WriteCopyType(file, it, "OutP->%s%s", "/* %s%s */ %s(%s)",
+		      arg->argMsgField, arg_suffix, it->itOutTrans, arg->argVarName);
+    } else
+	WriteCopyType(file, it, "OutP->%s%s", "/* %s%s */ %s",
+		      arg->argMsgField, arg_suffix, arg->argVarName);
 }
 
 static void
@@ -1084,7 +1183,7 @@ WriteArgSize(FILE *file, const argument_t *arg)
 		arg->argLongForm ? ".msgtl_header" : "");
     }
 
-    if (bsize % word_size != 0)
+    if (bsize % complex_alignof != 0)
 	fprintf(file, "(");
 
     if (bsize > 1)
@@ -1097,11 +1196,11 @@ WriteArgSize(FILE *file, const argument_t *arg)
 	fprintf(file, "%s", count->argVarName);
 
     /*
-     * If the base type size is not a multiple of word_size,
+     * If the base type size is not a multiple of complex_alignof,
      * we have to round up.
      */
-    if (bsize % word_size != 0)
-	fprintf(file, " + %d) & ~%d", word_size - 1, word_size - 1);
+    if (bsize % complex_alignof != 0)
+	fprintf(file, " + %zd) & ~%zdU", complex_alignof - 1, complex_alignof - 1);
 
     if (ptype->itIndefinite) {
 	fprintf(file, " : sizeof(%s *)",
@@ -1192,11 +1291,14 @@ WritePackArg(FILE *file, const argument_t *arg)
 	    fprintf(file, "\tOutP->%s = strlen(OutP->%s) + 1;\n",
 		    arg->argCount->argMsgField, arg->argMsgField);
 	} else if (it->itIndefinite) {
+	    const bool is_64bit_port = IS_64BIT_ABI && it->itUserlandPort;
+
 	    /*
 	     * We know that array is in reply message.
 	     */
-	    fprintf(file, "\tif (%sP != OutP->%s) {\n",
+	    fprintf(file, "\tif (%sP != %sOutP->%s) {\n",
 			arg->argVarName,
+			it->itUserlandPort ? "(mach_port_t *)" : "",
 			arg->argMsgField);
 	    fprintf(file, "\t\tOutP->%s%s.msgt_inline = FALSE;\n",
 		    arg->argTTName,
@@ -1210,12 +1312,31 @@ WritePackArg(FILE *file, const argument_t *arg)
 			arg->argTTName,
 			arg->argLongForm ? ".msgtl_header" : "",
 			arg->argDealloc->argVarName);
+	    if (is_64bit_port) {
+		/* We are passing the ports out of line, so they will always have the same size as a port name. */
+		fprintf(file, "\t\tOutP->%s%s.msgt_size = %d;\n",
+			arg->argTTName,
+			arg->argLongForm ? ".msgtl_header" : "",
+			port_name_size_in_bits);
+	    }
 	    fprintf(file, "\t\tOutP->%s%s = %sP;\n",
 			arg->argMsgField,
 			OOLPostfix,
 			arg->argVarName);
 	    if (!arg->argRoutine->rtSimpleFixedReply)
 		fprintf(file, "\t\tmsgh_simple = FALSE;\n");
+	    if (is_64bit_port) {
+		fprintf(file, "\t} else {\n");
+		fprintf(file, "\t\t/* Resize mach_port_name_t array into mach_port_name_inlined_t. */\n");
+		fprintf(file, "\t\t/* Work in reverse order to avoid overriding subsequent entries. */\n");
+		fprintf(file, "\t\tmach_msg_type_number_t i;\n");
+		fprintf(file, "\t\tfor(i = %s; i > 0; i--) {\n", arg->argCount->argVarName);
+		fprintf(file, "\t\t\tmach_port_name_t tmp_port_name = %sP[i - 1];\n", arg->argVarName);
+		fprintf(file, "\t\t\t/* Clear the whole message with zeros. */\n");
+		fprintf(file, "\t\t\tOutP->%s[i - 1].kernel_port_do_not_use = 0;\n", arg->argMsgField);
+		fprintf(file, "\t\t\tOutP->%s[i - 1].name = tmp_port_name;\n", arg->argMsgField);
+		fprintf(file, "\t\t}\n");
+	    }
 	    fprintf(file, "\t}\n");
 	}
     }
@@ -1327,7 +1448,7 @@ WriteRoutine(FILE *file, const routine_t *rt)
 
     WriteList(file, rt->rtArgs, WriteCheckDecl, akbRequestQC, "\n", "\n");
     WriteList(file, rt->rtArgs,
-	      IsKernelServer ? WriteTypeDeclOut : WriteTypeDeclIn,
+	      IsKernelServer ? WriteTypeDeclOutServer : WriteTypeDeclInServer,
 	      akbReplyInit, "\n", "\n");
 
     WriteList(file, rt->rtArgs, WriteLocalVarDecl,
@@ -1342,6 +1463,8 @@ WriteRoutine(FILE *file, const routine_t *rt)
 
     WriteServerCall(file, rt);
     WriteGetReturnValue(file, rt);
+
+    WriteReverseList(file, rt->rtArgs, WriteRestoreArg, akbNone, "", "");
 
     WriteReverseList(file, rt->rtArgs, WriteDestroyArg, akbDestroy, "", "");
 

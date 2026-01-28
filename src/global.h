@@ -27,18 +27,18 @@
 #ifndef	_GLOBAL_H
 #define	_GLOBAL_H
 
+#include <stdbool.h>
 #include <sys/types.h>
 
-#include "boolean.h"
 #include "mig_string.h"
 
-extern boolean_t DefaultFiles;	/* default output file names if no arguments */
-extern boolean_t BeQuiet;	/* no warning messages */
-extern boolean_t BeVerbose;	/* summarize types, routines */
-extern boolean_t GenSymTab;
+extern bool DefaultFiles;	/* default output file names if no arguments */
+extern bool BeQuiet;	/* no warning messages */
+extern bool BeVerbose;	/* summarize types, routines */
+extern bool GenSymTab;
 
-extern boolean_t IsKernelUser;
-extern boolean_t IsKernelServer;
+extern bool IsKernelUser;
+extern bool IsKernelServer;
 
 extern const_string_t RCSId;
 
@@ -47,7 +47,6 @@ extern u_int SubsystemBase;
 
 extern const_string_t MsgOption;
 extern const_string_t WaitTime;
-extern const_string_t ErrorProc;
 extern const_string_t ServerPrefix;
 extern const_string_t UserPrefix;
 extern const_string_t ServerDemux;
@@ -66,6 +65,12 @@ extern string_t ServerHeaderFileName;
 extern string_t InternalHeaderFileName;
 extern string_t UserFileName;
 extern string_t ServerFileName;
+
+extern size_t port_size;
+extern size_t port_size_in_bits;
+extern size_t complex_alignof;
+
+#define IS_64BIT_ABI (desired_complex_alignof == 8)
 
 extern void more_global(void);
 

@@ -24,16 +24,17 @@
  * rights to redistribute these changes.
  */
 
+#include "cpu.h"
 #include "error.h"
 #include "global.h"
 
-boolean_t DefaultFiles = TRUE;
-boolean_t BeQuiet = FALSE;
-boolean_t BeVerbose = FALSE;
-boolean_t GenSymTab = FALSE;
+bool DefaultFiles = true;
+bool BeQuiet = false;
+bool BeVerbose = false;
+bool GenSymTab = false;
 
-boolean_t IsKernelUser = FALSE;
-boolean_t IsKernelServer = FALSE;
+bool IsKernelUser = false;
+bool IsKernelServer = false;
 
 const_string_t RCSId = strNULL;
 
@@ -42,7 +43,6 @@ u_int SubsystemBase = 0;
 
 const_string_t MsgOption = strNULL;
 const_string_t WaitTime = strNULL;
-const_string_t ErrorProc = "MsgError";
 const_string_t ServerPrefix = "";
 const_string_t UserPrefix = "";
 const_string_t ServerDemux = strNULL;
@@ -64,6 +64,10 @@ string_t ServerHeaderFileName = strNULL;
 string_t InternalHeaderFileName = strNULL;
 string_t UserFileName = strNULL;
 string_t ServerFileName = strNULL;
+
+size_t port_size = sizeof_uintptr_t;
+size_t port_size_in_bits = sizeof_uintptr_t_in_bits;
+size_t complex_alignof = desired_complex_alignof;
 
 void
 more_global(void)

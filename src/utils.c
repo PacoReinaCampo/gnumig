@@ -29,6 +29,7 @@
 #include "write.h"
 #include "utils.h"
 #include "global.h"
+#include "cpu.h"
 
 void
 WriteImport(FILE *file, const_string_t filename)
@@ -77,7 +78,7 @@ WriteBogusDefines(FILE *file)
 
     fprintf(file, "#define BAD_TYPECHECK(type, check) mig_unlikely (({\\\n");
     fprintf(file,
-	    "  union { mach_msg_type_t t; uint32_t w; } _t, _c;\\\n");
+	    "  union { mach_msg_type_t t; uint%d_t w; } _t, _c;\\\n", desired_complex_alignof * 8);
     fprintf(file,
 	    "  _t.t = *(type); _c.t = *(check);_t.w != _c.w; }))\n");
 }
@@ -87,14 +88,14 @@ WriteList(FILE *file, const argument_t *args, write_list_fn_t *func, u_int mask,
 	  const char *between, const char *after)
 {
     const argument_t *arg;
-    boolean_t sawone = FALSE;
+    bool sawone = false;
 
     for (arg = args; arg != argNULL; arg = arg->argNext)
 	if (akCheckAll(arg->argKind, mask))
 	{
 	    if (sawone)
 		fprintf(file, "%s", between);
-	    sawone = TRUE;
+	    sawone = true;
 
 	    (*func)(file, arg);
 	}
@@ -103,11 +104,11 @@ WriteList(FILE *file, const argument_t *args, write_list_fn_t *func, u_int mask,
 	fprintf(file, "%s", after);
 }
 
-static boolean_t
+static bool
 WriteReverseListPrim(FILE *file, const argument_t *arg,
 		     write_list_fn_t *func, u_int mask, const char *between)
 {
-    boolean_t sawone = FALSE;
+    bool sawone = false;
 
     if (arg != argNULL)
     {
@@ -117,7 +118,7 @@ WriteReverseListPrim(FILE *file, const argument_t *arg,
 	{
 	    if (sawone)
 		fprintf(file, "%s", between);
-	    sawone = TRUE;
+	    sawone = true;
 
 	    (*func)(file, arg);
 	}
@@ -130,7 +131,7 @@ void
 WriteReverseList(FILE *file, const argument_t *args, write_list_fn_t *func,
 		 u_int mask, const char *between, const char *after)
 {
-    boolean_t sawone;
+    bool sawone;
 
     sawone = WriteReverseListPrim(file, args, func, mask, between);
 
@@ -146,7 +147,7 @@ WriteNameDecl(FILE *file, const argument_t *arg)
 
 /* Returns whether parameter should be qualified with const because we will only
    send the pointed data, not receive it. */
-static boolean_t
+static bool
 UserVarConst(const argument_t *arg)
 {
     return (arg->argKind & (akbSend|akbReturn)) == akbSend
@@ -159,9 +160,21 @@ UserVarQualifier(const argument_t *arg)
     if (!UserVarConst(arg))
 	return "";
 
-    if (arg->argType->itIndefinite)
-        /* This is a pointer type, so we have to use the const_foo type to
-	   make const qualify the data, not the pointer.  */
+    const ipc_type_t *it = arg->argType;
+
+    if (it->itIndefinite ||
+	it->itInName == MACH_MSG_TYPE_STRING_C ||
+	(it->itVarArray && !strcmp(it->itElement->itUserType, "char")) ||
+	!strcmp(it->itUserType, "string_t"))
+        /* This is a pointer, so we have to use the const_foo type to
+	   make const qualify the data, not the pointer.
+
+	   Or this is a pointer to a variable array. For now we only support arrays of char
+	   but we can remove that condition if we define const typedefs for all types that
+	   require it.
+
+	   Or this is a string_t, which should use const_string_t to avoid
+	   forcing the caller to respect the definite string size */
 	return "const_";
     else
 	return "const ";
@@ -170,35 +183,91 @@ UserVarQualifier(const argument_t *arg)
 void
 WriteUserVarDecl(FILE *file, const argument_t *arg)
 {
-    const char *qualif = UserVarQualifier(arg);
-    const char *ref = arg->argByReferenceUser ? "*" : "";
+    const ipc_type_t *it = arg->argType;
 
-    fprintf(file, "\t%s%s %s%s", qualif, arg->argType->itUserType, ref, arg->argVarName);
+    if (it->itInLine && it->itVarArray && !it->itIndefinite &&
+	!UserVarConst(arg) &&
+	!strcmp(it->itElement->itUserType, "char"))
+    {
+	/* For variable arrays like "array[*:128] of char" we prefer to use "char *param"
+	 * as the argument since it is more standard than using "char param[128]".
+	 */
+	fprintf(file, "\tchar *%s /* max of %d elements */", arg->argVarName, it->itNumber);
+    } else {
+	const char *qualif = UserVarQualifier(arg);
+	const char *ref = arg->argByReferenceUser ? "*" : "";
+	fprintf(file, "\t%s%s %s%s", qualif, it->itUserType, ref, arg->argVarName);
+    }
+}
+
+/* Returns whether parameter should be qualified with const because we will only
+   receive the pointed data, not modify it. */
+static bool
+ServerVarConst(const argument_t *arg)
+{
+    return (arg->argKind & (akbSend|akbReturn)) == akbSend
+	    && !arg->argType->itStruct;
+}
+
+const char *
+ServerVarQualifier(const argument_t *arg)
+{
+    if (!ServerVarConst(arg))
+	return "";
+
+    if (arg->argType->itIndefinite ||
+	arg->argType->itInName == MACH_MSG_TYPE_STRING_C ||
+	!strcmp(arg->argType->itTransType, "string_t"))
+        /* This is a pointer, so we have to use the const_foo type to
+	   make const qualify the data, not the pointer.
+
+	   Or this is a string_t, which should use const_string_t to avoid
+	   forcing the caller to respect the definite string size */
+	return "const_";
+    else
+	return "const ";
 }
 
 void
 WriteServerVarDecl(FILE *file, const argument_t *arg)
 {
+    const char *qualif = ServerVarQualifier(arg);
     const char *ref = arg->argByReferenceServer ? "*" : "";
 
-    fprintf(file, "\t%s %s%s",
-	    arg->argType->itTransType, ref, arg->argVarName);
+    fprintf(file, "\t%s%s %s%s",
+	    qualif, arg->argType->itTransType, ref, arg->argVarName);
 }
 
 void
-WriteTypeDeclIn(FILE *file, const argument_t *arg)
+WriteTypeDeclInServer(FILE *file, const argument_t *arg)
 {
     WriteStaticDecl(file, arg->argType,
 		    arg->argType->itIndefinite ? d_NO : arg->argDeallocate,
-		    arg->argLongForm, TRUE, arg->argTTName);
+		    arg->argLongForm, /*is_server=*/true, true, arg->argTTName);
 }
 
 void
-WriteTypeDeclOut(FILE *file, const argument_t *arg)
+WriteTypeDeclOutServer(FILE *file, const argument_t *arg)
 {
     WriteStaticDecl(file, arg->argType,
 		    arg->argType->itIndefinite ? d_NO : arg->argDeallocate,
-		    arg->argLongForm, FALSE, arg->argTTName);
+		    arg->argLongForm, /*is_server=*/true, false, arg->argTTName);
+}
+
+void
+WriteTypeDeclInUser(FILE *file, const argument_t *arg)
+{
+    WriteStaticDecl(file, arg->argType,
+		    arg->argType->itIndefinite ? d_NO : arg->argDeallocate,
+		    arg->argLongForm, /*is_server=*/false, true, arg->argTTName);
+}
+
+void
+WriteTypeDeclOutUser(FILE *file, const argument_t *arg)
+{
+    WriteStaticDecl(file, arg->argType,
+		    arg->argType->itIndefinite ? d_NO : arg->argDeallocate,
+		    arg->argLongForm, /*is_server=*/false, false, arg->argTTName);
 }
 
 void
@@ -212,15 +281,15 @@ WriteCheckDecl(FILE *file, const argument_t *arg)
 
     fprintf(file, "\tconst mach_msg_type_t %sCheck = {\n",
 	    arg->argVarName);
-    fprintf(file, "\t\t/* msgt_name = */\t\t(unsigned char) %s,\n", it->itOutNameStr);
-    fprintf(file, "\t\t/* msgt_size = */\t\t%d,\n", it->itSize);
-    fprintf(file, "\t\t/* msgt_number = */\t\t%d,\n", it->itNumber);
-    fprintf(file, "\t\t/* msgt_inline = */\t\t%s,\n",
+    fprintf(file, "\t\t.msgt_name =\t\t(unsigned char) %s,\n", it->itOutNameStr);
+    fprintf(file, "\t\t.msgt_size =\t\t%d,\n", it->itSize);
+    fprintf(file, "\t\t.msgt_number =\t\t%d,\n", it->itNumber);
+    fprintf(file, "\t\t.msgt_inline =\t\t%s,\n",
 	    strbool(it->itInLine));
-    fprintf(file, "\t\t/* msgt_longform = */\t\tFALSE,\n");
-    fprintf(file, "\t\t/* msgt_deallocate = */\t\t%s,\n",
+    fprintf(file, "\t\t.msgt_longform =\t\tFALSE,\n");
+    fprintf(file, "\t\t.msgt_deallocate =\t\t%s,\n",
 	    strbool(!it->itInLine));
-    fprintf(file, "\t\t/* msgt_unused = */\t\t0\n");
+    fprintf(file, "\t\t.msgt_unused =\t\t0\n");
     fprintf(file, "\t};\n");
 }
 
@@ -254,9 +323,21 @@ WriteFieldDeclPrim(FILE *file, const argument_t *arg,
     fprintf(file, "\t\tmach_msg_type_%st %s;\n",
 	    arg->argLongForm ? "long_" : "", arg->argTTName);
 
+    /* Pad mach_msg_type_t/mach_msg_type_long_t in case we need alignment by more than its size. */
+    if (!arg->argLongForm && sizeof_mach_msg_type_t % complex_alignof) {
+        fprintf(file, "\t\tchar %s_pad[%zd];\n",
+		arg->argTTName, complex_alignof - sizeof_mach_msg_type_t % complex_alignof);
+    } else if (arg->argLongForm && sizeof_mach_msg_type_long_t % complex_alignof) {
+	fprintf(file, "\t\tchar %s_pad[%zd];\n", arg->argTTName,
+		complex_alignof - sizeof_mach_msg_type_long_t % complex_alignof);
+    }
+
     if (it->itInLine && it->itVarArray)
     {
 	ipc_type_t *btype = it->itElement;
+	identifier_t original_type_name = (*tfunc)(btype);
+	identifier_t inlined_type_name = btype->itUserlandPort ?
+	    "mach_port_name_inlined_t" : original_type_name;
 
 	/*
 	 *	Build our own declaration for a varying array:
@@ -265,19 +346,27 @@ WriteFieldDeclPrim(FILE *file, const argument_t *arg,
 	 */
 	fprintf(file, "\t\tunion {\n");
 	fprintf(file, "\t\t\t%s %s[%d];\n",
-			(*tfunc)(btype),
+			inlined_type_name,
 			arg->argMsgField,
 			it->itNumber/btype->itNumber);
 	fprintf(file, "\t\t\t%s%s *%s%s;\n",
 			tfunc == FetchUserType && UserVarConst(arg)
 				? "const " : "",
-			(*tfunc)(btype),
+			original_type_name,
 			arg->argMsgField,
 			OOLPostfix);
 	fprintf(file, "\t\t};");
     }
     else
-	fprintf(file, "\t\t%s %s;", (*tfunc)(it), arg->argMsgField);
+    {
+        identifier_t original_type_name = (*tfunc)(it);
+        identifier_t final_type_name = it->itUserlandPort && it->itInLine ?
+	    "mach_port_name_inlined_t" : original_type_name;
+
+        fprintf(file, "\t\t%s %s;",
+		final_type_name,
+                arg->argMsgField);
+    }
 
     if (it->itPadSize != 0)
 	fprintf(file, "\n\t\tchar %s[%d];", arg->argPadName, it->itPadSize);
@@ -296,53 +385,78 @@ WriteStructDecl(FILE *file, const argument_t *args, write_list_fn_t *func,
 
 static void
 WriteStaticLongDecl(FILE *file, const ipc_type_t *it,
-		    dealloc_t dealloc, boolean_t inname, identifier_t name)
+		    dealloc_t dealloc, bool inname, identifier_t name)
 {
+    const_string_t msgt_name = inname ? it->itInNameStr : it->itOutNameStr;
     fprintf(file, "\tconst mach_msg_type_long_t %s = {\n", name);
-    fprintf(file, "\t{\n");
-    fprintf(file, "\t\t/* msgt_name = */\t\t0,\n");
-    fprintf(file, "\t\t/* msgt_size = */\t\t0,\n");
-    fprintf(file, "\t\t/* msgt_number = */\t\t0,\n");
-    fprintf(file, "\t\t/* msgt_inline = */\t\t%s,\n",
+    fprintf(file, "\t\t.msgtl_header = {\n");
+    if (IS_64BIT_ABI) {
+	/* For the 64 bit ABI we don't really have mach_msg_type_long_t
+	 * so we fill mach_msg_type_long_t just like mach_msg_type_t.
+	 */
+	fprintf(file, "\t\t\t.msgt_name =\t\t(unsigned char) %s,\n", msgt_name);
+	/* In case we are passing out of line ports, we always send as a contiguous array of port names
+	 * rather than mach_port_name_inlined_t. */
+	const u_int true_size = (it->itUserlandPort && !it->itInLine && it->itNumber == 0) ?
+	    port_name_size_in_bits : it->itSize;
+	fprintf(file, "\t\t\t.msgt_size =\t\t%d,\n", true_size);
+	fprintf(file, "\t\t\t.msgt_number =\t\t%d,\n", it->itNumber);
+    } else {
+	fprintf(file, "\t\t\t.msgt_name =\t\t0,\n");
+	fprintf(file, "\t\t\t.msgt_size =\t\t0,\n");
+	fprintf(file, "\t\t\t.msgt_number =\t\t0,\n");
+    }
+    fprintf(file, "\t\t\t.msgt_inline =\t\t%s,\n",
 	    strbool(it->itInLine));
-    fprintf(file, "\t\t/* msgt_longform = */\t\tTRUE,\n");
-    fprintf(file, "\t\t/* msgt_deallocate = */\t\t%s,\n",
+    fprintf(file, "\t\t\t.msgt_longform =\t\tTRUE,\n");
+    fprintf(file, "\t\t\t.msgt_deallocate =\t\t%s,\n",
 	    strdealloc(dealloc));
-    fprintf(file, "\t\t/* msgt_unused = */\t\t0\n");
-    fprintf(file, "\t},\n");
-    fprintf(file, "\t\t/* msgtl_name = */\t(unsigned short) %s,\n",
-	    inname ? it->itInNameStr : it->itOutNameStr);
-    fprintf(file, "\t\t/* msgtl_size = */\t%d,\n", it->itSize);
-    fprintf(file, "\t\t/* msgtl_number = */\t%d,\n", it->itNumber);
+    fprintf(file, "\t\t\t.msgt_unused =\t\t0\n");
+    fprintf(file, "\t\t},\n");
+    if (!IS_64BIT_ABI) {
+	fprintf(file, "\t\t.msgtl_name =\t(unsigned short) %s,\n", msgt_name);
+	fprintf(file, "\t\t.msgtl_size =\t%d,\n", it->itSize);
+	fprintf(file, "\t\t.msgtl_number =\t%d,\n", it->itNumber);
+    }
     fprintf(file, "\t};\n");
 }
 
 static void
 WriteStaticShortDecl(FILE *file, const ipc_type_t *it,
-		     dealloc_t dealloc, boolean_t inname, identifier_t name)
+		     dealloc_t dealloc, bool is_server, bool inname,
+		     identifier_t name)
 {
     fprintf(file, "\tconst mach_msg_type_t %s = {\n", name);
-    fprintf(file, "\t\t/* msgt_name = */\t\t(unsigned char) %s,\n",
+    fprintf(file, "\t\t.msgt_name =\t\t(unsigned char) %s,\n",
 	    inname ? it->itInNameStr : it->itOutNameStr);
-    fprintf(file, "\t\t/* msgt_size = */\t\t%d,\n", it->itSize);
-    fprintf(file, "\t\t/* msgt_number = */\t\t%d,\n", it->itNumber);
-    fprintf(file, "\t\t/* msgt_inline = */\t\t%s,\n",
+    fprintf(file, "\t\t.msgt_size =\t\t%d,\n", it->itSize);
+    fprintf(file, "\t\t.msgt_number =\t\t%d,\n", it->itNumber);
+    fprintf(file, "\t\t.msgt_inline =\t\t%s,\n",
 	    strbool(it->itInLine));
-    fprintf(file, "\t\t/* msgt_longform = */\t\tFALSE,\n");
-    fprintf(file, "\t\t/* msgt_deallocate = */\t\t%s,\n",
+    fprintf(file, "\t\t.msgt_longform =\t\tFALSE,\n");
+    fprintf(file, "\t\t.msgt_deallocate =\t\t%s,\n",
 	    strdealloc(dealloc));
-    fprintf(file, "\t\t/* msgt_unused = */\t\t0\n");
+    fprintf(file, "\t\t.msgt_unused =\t\t0\n");
     fprintf(file, "\t};\n");
+    if (it->itInLine && !it->itVarArray) {
+        identifier_t type = is_server ? FetchServerType(it) : FetchUserType(it);
+        identifier_t actual_type = it->itUserlandPort ? "mach_port_name_inlined_t" : type;
+        const u_int size_bytes = it->itSize >> 3;
+        fprintf(file, "\t_Static_assert(sizeof(%s) == %d * %d, \"expected %s to be size %d * %d\");\n",
+                      actual_type, size_bytes, it->itNumber,
+                      actual_type, size_bytes, it->itNumber);
+    }
 }
 
 void
 WriteStaticDecl(FILE *file, const ipc_type_t *it, dealloc_t dealloc,
-		boolean_t longform, boolean_t inname, identifier_t name)
+		bool longform, bool is_server, bool inname,
+		identifier_t name)
 {
     if (longform)
 	WriteStaticLongDecl(file, it, dealloc, inname, name);
     else
-	WriteStaticShortDecl(file, it, dealloc, inname, name);
+	WriteStaticShortDecl(file, it, dealloc, is_server, inname, name);
 }
 
 /*
@@ -444,7 +558,7 @@ WriteCopyType(FILE *file, const ipc_type_t *it, const char *left,
 
 void
 WritePackMsgType(FILE *file, const ipc_type_t *it, dealloc_t dealloc,
-		 boolean_t longform, boolean_t inname, const char *left,
+		 bool longform, bool inname, const char *left,
 		 const char *right, ...)
 {
     fprintf(file, "\t");

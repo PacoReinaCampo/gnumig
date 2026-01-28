@@ -38,15 +38,11 @@ AC_PROG_INSTALL
 dnl Checks for header files.
 AC_HEADER_STDC
 
-dnl Checks for library functions.
-AC_FUNC_VPRINTF
-
-
 [if [ "$target" = "$host" ]; then
   TARGET_CC='${CC}'
 else]
   AC_CHECK_PROG([TARGET_CC], [$target_alias-gcc], [$target_alias-gcc], [none])
-  [if [ x"$TARGET_CC" != x"$target_alias"-gcc ]; then]
+  [if [ x"$TARGET_CC" = xnone ]; then]
     AC_MSG_ERROR([could not find a compiler for the target you requested])
   [fi
 fi]

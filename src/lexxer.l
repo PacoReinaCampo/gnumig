@@ -1,4 +1,5 @@
 %option nounput
+%option noyywrap
 
 %k 10000
 %n 5000
@@ -106,7 +107,7 @@ static struct yysvf *oldYYBegin;
 #define RSTR_BEGIN yybgin = oldYYBegin;
 #endif
 
-static void doSharp(const char *body); /* process body of # directives */
+static void doSharp(char *body); /* process body of # directives */
 %}
 
 %Start	Normal String FileName QString SkipToEOL
@@ -129,7 +130,6 @@ static void doSharp(const char *body); /* process body of # directives */
 <Normal>(?i:sreplyport)		RETURN(sySReplyPort);
 <Normal>(?i:array)		RETURN(syArray);
 <Normal>(?i:of)			RETURN(syOf);
-<Normal>(?i:error)		RETURN(syErrorProc);
 <Normal>(?i:serverprefix)       RETURN(syServerPrefix);
 <Normal>(?i:userprefix)		RETURN(syUserPrefix);
 <Normal>(?i:serverdemux)	RETURN(syServerDemux);
@@ -159,7 +159,7 @@ static void doSharp(const char *body); /* process body of # directives */
 <Normal>(?i:countinout)		FRETURN(flCountInOut);
 <Normal>(?i:retcode)		FRETURN(flNone);
 
-<Normal>(?i:polymorphic)	TRETURN(MACH_MSG_TYPE_POLYMORPHIC,word_size_in_bits);
+<Normal>(?i:polymorphic)	TRETURN(MACH_MSG_TYPE_POLYMORPHIC,port_size_in_bits);
 
 <Normal>"MACH_MSG_TYPE_UNSTRUCTURED"	TRETURN(MACH_MSG_TYPE_UNSTRUCTURED,0);
 <Normal>"MACH_MSG_TYPE_BIT"		TRETURN(MACH_MSG_TYPE_BIT,1);
@@ -174,17 +174,17 @@ static void doSharp(const char *body); /* process body of # directives */
 <Normal>"MACH_MSG_TYPE_STRING"		TRETURN(MACH_MSG_TYPE_STRING,0);
 <Normal>"MACH_MSG_TYPE_STRING_C"	TRETURN(MACH_MSG_TYPE_STRING_C,0);
 
-<Normal>"MACH_MSG_TYPE_MOVE_RECEIVE"	TPRETURN(MACH_MSG_TYPE_MOVE_RECEIVE,MACH_MSG_TYPE_PORT_RECEIVE,word_size_in_bits);
-<Normal>"MACH_MSG_TYPE_COPY_SEND"	TPRETURN(MACH_MSG_TYPE_COPY_SEND,MACH_MSG_TYPE_PORT_SEND,word_size_in_bits);
-<Normal>"MACH_MSG_TYPE_MAKE_SEND"	TPRETURN(MACH_MSG_TYPE_MAKE_SEND,MACH_MSG_TYPE_PORT_SEND,word_size_in_bits);
-<Normal>"MACH_MSG_TYPE_MOVE_SEND"	TPRETURN(MACH_MSG_TYPE_MOVE_SEND,MACH_MSG_TYPE_PORT_SEND,word_size_in_bits);
-<Normal>"MACH_MSG_TYPE_MAKE_SEND_ONCE"	TPRETURN(MACH_MSG_TYPE_MAKE_SEND_ONCE,MACH_MSG_TYPE_PORT_SEND_ONCE,word_size_in_bits);
-<Normal>"MACH_MSG_TYPE_MOVE_SEND_ONCE"	TPRETURN(MACH_MSG_TYPE_MOVE_SEND_ONCE,MACH_MSG_TYPE_PORT_SEND_ONCE,word_size_in_bits);
+<Normal>"MACH_MSG_TYPE_MOVE_RECEIVE"	TPRETURN(MACH_MSG_TYPE_MOVE_RECEIVE,MACH_MSG_TYPE_PORT_RECEIVE,port_size_in_bits);
+<Normal>"MACH_MSG_TYPE_COPY_SEND"	TPRETURN(MACH_MSG_TYPE_COPY_SEND,MACH_MSG_TYPE_PORT_SEND,port_size_in_bits);
+<Normal>"MACH_MSG_TYPE_MAKE_SEND"	TPRETURN(MACH_MSG_TYPE_MAKE_SEND,MACH_MSG_TYPE_PORT_SEND,port_size_in_bits);
+<Normal>"MACH_MSG_TYPE_MOVE_SEND"	TPRETURN(MACH_MSG_TYPE_MOVE_SEND,MACH_MSG_TYPE_PORT_SEND,port_size_in_bits);
+<Normal>"MACH_MSG_TYPE_MAKE_SEND_ONCE"	TPRETURN(MACH_MSG_TYPE_MAKE_SEND_ONCE,MACH_MSG_TYPE_PORT_SEND_ONCE,port_size_in_bits);
+<Normal>"MACH_MSG_TYPE_MOVE_SEND_ONCE"	TPRETURN(MACH_MSG_TYPE_MOVE_SEND_ONCE,MACH_MSG_TYPE_PORT_SEND_ONCE,port_size_in_bits);
 
-<Normal>"MACH_MSG_TYPE_PORT_NAME"	TRETURN(MACH_MSG_TYPE_PORT_NAME,word_size_in_bits);
-<Normal>"MACH_MSG_TYPE_PORT_RECEIVE"	TPRETURN(MACH_MSG_TYPE_POLYMORPHIC,MACH_MSG_TYPE_PORT_RECEIVE,word_size_in_bits);
-<Normal>"MACH_MSG_TYPE_PORT_SEND"	TPRETURN(MACH_MSG_TYPE_POLYMORPHIC,MACH_MSG_TYPE_PORT_SEND,word_size_in_bits);
-<Normal>"MACH_MSG_TYPE_PORT_SEND_ONCE"	TPRETURN(MACH_MSG_TYPE_POLYMORPHIC,MACH_MSG_TYPE_PORT_SEND_ONCE,word_size_in_bits);
+<Normal>"MACH_MSG_TYPE_PORT_NAME"	TRETURN(MACH_MSG_TYPE_PORT_NAME,port_name_size_in_bits);
+<Normal>"MACH_MSG_TYPE_PORT_RECEIVE"	TPRETURN(MACH_MSG_TYPE_POLYMORPHIC,MACH_MSG_TYPE_PORT_RECEIVE,port_size_in_bits);
+<Normal>"MACH_MSG_TYPE_PORT_SEND"	TPRETURN(MACH_MSG_TYPE_POLYMORPHIC,MACH_MSG_TYPE_PORT_SEND,port_size_in_bits);
+<Normal>"MACH_MSG_TYPE_PORT_SEND_ONCE"	TPRETURN(MACH_MSG_TYPE_POLYMORPHIC,MACH_MSG_TYPE_PORT_SEND_ONCE,port_size_in_bits);
 <Normal>"MACH_MSG_TYPE_POLYMORPHIC"	TRETURN(MACH_MSG_TYPE_POLYMORPHIC,0);
 
 <Normal>":"		RETURN(syColon);
@@ -203,6 +203,8 @@ static void doSharp(const char *body); /* process body of # directives */
 <Normal>">"		RETURN(syRAngle);
 <Normal>"["		RETURN(syLBrack);
 <Normal>"]"		RETURN(syRBrack);
+<Normal>"{"		RETURN(syLCBrack);
+<Normal>"}"		RETURN(syRCBrack);
 <Normal>"|"		RETURN(syBar);
 
 <Normal>{Ident}		{ yylval.identifier = strmake(yytext);
@@ -269,7 +271,7 @@ LookFileName(void)
 }
 
 static void
-doSharp(const char *body)
+doSharp(char *body)
 {
     const char *startName;
 
